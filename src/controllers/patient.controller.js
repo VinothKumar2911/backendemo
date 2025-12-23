@@ -203,3 +203,35 @@ exports.getPatientDashboard = async (req, res) => {
     });
   }
 };
+
+
+router.get('/programs', authMiddleware, async (req, res) => {
+  try {
+    const phone = req.user.phone;
+
+    const [[patient]] = await db.query(
+      `SELECT id, name FROM patients WHERE phone = ?`,
+      [phone]
+    );
+
+    if (!patient) {
+      return res.status(404).json({ message: 'Patient not found' });
+    }
+
+    const [programs] = await db.query(
+      `SELECT p.id, p.name, p.total_minutes
+       FROM patient_programs pp
+       JOIN programs p ON p.id = pp.program_id
+       WHERE pp.patient_id = ?`,
+      [patient.id]
+    );
+
+    res.json({
+      patientName: patient.name,
+      programs,
+    });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
