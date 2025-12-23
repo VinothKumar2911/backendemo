@@ -37,49 +37,52 @@ const jwt = require('jsonwebtoken');
 exports.verifyOtp = async (req, res) => {
   try {
     const { phone, otp } = req.body;
+    console.log("VERIFY OTP HIT:", phone, otp);
 
-    console.log("VERIFY OTP:", phone, otp);
+    // 1️⃣ Validate input
+    if (!phone || !otp) {
+      return res.status(400).json({ message: 'Phone and OTP required' });
+    }
 
-    // 🔹 DEMO STATIC OTP
+    // 2️⃣ Check OTP
     if (otp !== '1234') {
       return res.status(401).json({ message: 'Invalid OTP' });
     }
 
-    // 🔹 DEMO ROLE LOGIC
-    let role = 'patient';
-    if (phone === '9000000001') role = 'doctor';
-    if (phone === '9000000003') role = 'admin';
-
-    // 🔹 CREATE JWT (DEMO)
-    // 1️⃣ Fetch user from users_auth table
-    const [[user]] = await pool.query(
+    // 3️⃣ Fetch user from DB
+    const [rows] = await pool.query(
       `SELECT id, role FROM users_auth WHERE phone = ?`,
       [phone]
     );
 
-    if (!user) {
-      return res.status(404).json({ message: 'User not found' });
+    console.log("USER QUERY RESULT:", rows);
+
+    if (!rows || rows.length === 0) {
+      return res.status(404).json({ message: 'User not found in DB' });
     }
 
-    // 2️⃣ Generate JWT WITH userId
+    const user = rows[0];
+
+    // 4️⃣ Generate JWT with userId
     const token = jwt.sign(
       {
-        userId: user.id,   // 🔥 THIS FIXES EVERYTHING
+        userId: user.id,
         role: user.role,
       },
       process.env.JWT_SECRET || 'demo_secret',
       { expiresIn: '1d' }
     );
 
-
+    // 5️⃣ Success
     return res.status(200).json({
       token,
-      role,
+      role: user.role,
     });
 
-  } catch (error) {
-    console.error("VERIFY OTP ERROR:", error);
+  } catch (err) {
+    console.error("VERIFY OTP SERVER ERROR:", err);
     return res.status(500).json({ message: 'Server error' });
   }
 };
+
 
