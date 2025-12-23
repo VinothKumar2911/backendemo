@@ -1,6 +1,5 @@
 const express = require('express');
 const router = express.Router();
-module.exports = router;
 
 const patientController = require('../controllers/patient.controller');
 const {
@@ -8,7 +7,15 @@ const {
   allowPatient,
 } = require('../middleware/auth.middleware');
 
+// 🔹 DASHBOARD (Programs + Exercises)
+router.get(
+  '/dashboard',
+  verifyToken,
+  allowPatient,
+  patientController.getPatientDashboard
+);
 
+// 🔹 VIDEO STREAM
 router.get(
   '/exercise/:exerciseId/video',
   verifyToken,
@@ -16,6 +23,7 @@ router.get(
   patientController.getExerciseVideo
 );
 
+// 🔹 WATCH PROGRESS
 router.post(
   '/exercise/progress',
   verifyToken,
@@ -23,6 +31,7 @@ router.post(
   patientController.updateProgress
 );
 
+// 🔹 FEEDBACK
 router.post(
   '/feedback',
   verifyToken,
@@ -30,9 +39,4 @@ router.post(
   patientController.submitFeedback
 );
 
-router.get(
-  '/dashboard',
-  verifyToken,
-  allowPatient,
-  patientController.getPatientDashboard
-);
+module.exports = router;
