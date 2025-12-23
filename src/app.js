@@ -6,6 +6,15 @@ const patientRoutes = require('./routes/patient.routes'); // 👈 ADD THIS
 const app = express();
 app.use(express.json());
 
+const cors = require('cors');
+
+app.use(cors({
+  origin: '*',
+  methods: ['GET', 'POST', 'PUT', 'DELETE'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+}));
+
+
 app.use('/auth', authRoutes);
 app.use('/doctor', doctorRoutes); // 👈 ADD THIS
 app.use('/patient', patientRoutes); // 👈 ADD THIS
