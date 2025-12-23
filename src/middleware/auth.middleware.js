@@ -24,8 +24,9 @@ exports.allowDoctor = (req, res, next) => {
 };
 
 exports.allowPatient = (req, res, next) => {
-  if (req.user.role !== 'patient') {
-    return res.status(403).json({ message: 'Patient access only' });
+  if (req.user && req.user.role === 'patient') {
+    return next();
   }
-  next();
+  return res.status(403).json({ message: 'Access denied' });
 };
+

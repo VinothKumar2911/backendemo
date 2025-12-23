@@ -51,11 +51,26 @@ exports.verifyOtp = async (req, res) => {
     if (phone === '9000000003') role = 'admin';
 
     // 🔹 CREATE JWT (DEMO)
+    // 1️⃣ Fetch user from users_auth table
+    const [[user]] = await pool.query(
+      `SELECT id, role FROM users_auth WHERE phone = ?`,
+      [phone]
+    );
+
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    // 2️⃣ Generate JWT WITH userId
     const token = jwt.sign(
-      { phone, role },
+      {
+        userId: user.id,   // 🔥 THIS FIXES EVERYTHING
+        role: user.role,
+      },
       process.env.JWT_SECRET || 'demo_secret',
       { expiresIn: '1d' }
     );
+
 
     return res.status(200).json({
       token,

@@ -108,7 +108,10 @@ if (existing) {
 
   res.json({ message: 'Feedback submitted' });
 };
+
 exports.getPatientDashboard = async (req, res) => {
+  console.log("JWT USER:", req.user);
+
   try {
     // 1️⃣ Map auth user → patient
     const [[patient]] = await pool.query(
