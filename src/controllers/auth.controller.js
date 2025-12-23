@@ -32,65 +32,39 @@ exports.sendOtp = async (req, res) => {
  * - OTP is always 1234
  * - Role decided from DB
  */
+const jwt = require('jsonwebtoken');
+
 exports.verifyOtp = async (req, res) => {
   try {
     const { phone, otp } = req.body;
 
-    if (!phone || !otp) {
-      return res.status(400).json({
-        message: 'Phone and OTP are required'
-      });
-    }
+    console.log("VERIFY OTP:", phone, otp);
 
-    // ✅ DEMO STATIC OTP CHECK
+    // 🔹 DEMO STATIC OTP
     if (otp !== '1234') {
-      return res.status(401).json({
-        message: 'Invalid OTP (Demo)'
-      });
+      return res.status(401).json({ message: 'Invalid OTP' });
     }
 
-    // Check if user already exists
-    const [users] = await pool.query(
-      `SELECT * FROM users_auth WHERE phone = ?`,
-      [phone]
+    // 🔹 DEMO ROLE LOGIC
+    let role = 'patient';
+    if (phone === '9000000001') role = 'doctor';
+    if (phone === '9000000003') role = 'admin';
+
+    // 🔹 CREATE JWT (DEMO)
+    const token = jwt.sign(
+      { phone, role },
+      process.env.JWT_SECRET || 'demo_secret',
+      { expiresIn: '1d' }
     );
 
-    let user;
-
-    if (users.length === 0) {
-      // New user → default role = patient
-      const userId = uuidv4();
-
-      await pool.query(
-        `INSERT INTO users_auth (id, phone, role, is_verified)
-         VALUES (?, ?, 'patient', true)`,
-        [userId, phone]
-      );
-
-      user = {
-        id: userId,
-        role: 'patient'
-      };
-    } else {
-      user = users[0];
-    }
-
-    // Generate JWT
-    const token = generateToken({
-      userId: user.id,
-      role: user.role
-    });
-
-    return res.json({
-      message: 'Login successful (Demo)',
+    return res.status(200).json({
       token,
-      role: user.role
+      role,
     });
 
-  } catch (err) {
-    console.error('VERIFY OTP ERROR:', err);
-    return res.status(500).json({
-      message: 'Login failed'
-    });
+  } catch (error) {
+    console.error("VERIFY OTP ERROR:", error);
+    return res.status(500).json({ message: 'Server error' });
   }
 };
+
