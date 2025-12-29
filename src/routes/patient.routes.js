@@ -28,7 +28,7 @@ router.post(
   '/exercise/progress',
   verifyToken,
   allowPatient,
-  patientController.updateProgress
+  patientController.updateExerciseProgress
 );
 
 // 🔹 FEEDBACK
@@ -38,5 +38,26 @@ router.post(
   allowPatient,
   patientController.submitFeedback
 );
+
+router.get(
+  '/profile',
+  verifyToken,
+  allowPatient,
+  patientController.getPatientProfile
+);
+
+router.put(
+  '/profile',
+  verifyToken,
+  allowPatient,
+  patientController.updatePatientProfile
+);
+router.get(
+  '/program/:programId',
+  verifyToken,
+  allowPatient,
+  patientController.getPatientProgramDetail
+);
+
 
 module.exports = router;
