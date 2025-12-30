@@ -146,7 +146,7 @@ exports.getPatientDashboard = async (req, res) => {
     const todayExercises = rows.map(r => ({
       id: r.exercise_id,
       title: r.title,
-      videoUrl: r.video_url, 
+      videoUrl: r.video_url,
       durationMinutes: r.duration_minutes,
       programName: r.program_name,
       completed: !!r.completed,
@@ -257,6 +257,11 @@ exports.getPatientProgramDetail = async (req, res) => {
       'SELECT id FROM patients WHERE user_auth_id = ?',
       [req.user.userId]
     );
+    if (!patient || !patient.name) {
+      return res.status(403).json({
+        message: 'Patient profile incomplete'
+      });
+    }
 
     const [rows] = await pool.query(
       `

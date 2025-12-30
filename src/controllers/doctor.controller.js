@@ -341,13 +341,24 @@ exports.createPatient = async (req, res) => {
       ? `/uploads/patients/${req.file.filename}`
       : null;
 
+    const [[authUser]] = await pool.query(
+      `SELECT id FROM users_auth WHERE phone = ? AND role = 'patient'`,
+      [phone]
+    );
+
+    if (!authUser) {
+      return res.status(400).json({
+        message: 'Patient must register with OTP first'
+      });
+    }
 
 
     await pool.query(
       `
       INSERT INTO patients
-      (id, doctor_id, name, age, phone, email, gender, photo_url, active)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?,true)
+(id, doctor_id, user_auth_id, name, age, phone, email, gender, photo_url, active)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, true)
+
       `,
       [patientId, doctor.id, name, age, phone, email, gender, photoUrl]
     );
