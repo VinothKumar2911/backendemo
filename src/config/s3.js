@@ -1,19 +1,13 @@
-const { S3Client, GetObjectCommand } = require('@aws-sdk/client-s3');
-const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
+const AWS = require('aws-sdk');
 
-const s3 = new S3Client({
+const s3 = new AWS.S3({
   region: process.env.AWS_REGION,
-  credentials: {
-    accessKeyId: process.env.AWS_ACCESS_KEY,
-    secretAccessKey: process.env.AWS_SECRET_KEY,
-  },
 });
 
-exports.getSignedVideoUrl = async (key) => {
-  const command = new GetObjectCommand({
-    Bucket: process.env.AWS_BUCKET,
-    Key: key, // S3 OBJECT KEY (not public URL)
+exports.getSignedUrl = (key) => {
+  return s3.getSignedUrl('getObject', {
+    Bucket: 'hospital-app-media',
+    Key: key,
+    Expires: 900, // 5 minutes
   });
-
-  return getSignedUrl(s3, command, { expiresIn: 600 }); // 10 minutes
 };
