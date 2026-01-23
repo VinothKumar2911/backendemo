@@ -26,7 +26,13 @@ jobs:
         run: npm install
 
       - name: Zip Lambda package
-        run: zip -r function.zip .
+  run: |
+    zip -r function.zip \
+      index.js \
+      src \
+      node_modules \
+      package.json
+
 
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
