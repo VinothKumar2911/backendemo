@@ -2,12 +2,14 @@
   const { generateCustomId } = require('../utils/idGenerator');
   const { normalizePhone } = require('../utils/phone');
   const { getSignedUrl } = require('../config/s3');
+const upload = require('../middleware/upload.middleware');
 
+const { uploadToS3 } = require('../config/s3');
 
   /* =========================
     ADMIN DASHBOARD
   ========================= */
-  exports.getAdminDashboard = async (req, res) => {
+  exports.getAdminDashboard = async (req, res) => { 
     try {
       const [[doctorCount]] = await pool.query(
         `SELECT COUNT(*) AS count FROM doctors`
@@ -54,25 +56,24 @@
     }
   };
 
-// const { getSignedUrl } = require('../utils/s3');
-
-// controllers/exerciseController.js
-// const pool = require('../config/db');
-// const { getSignedUrl } = require('../utils/s3');
 
 exports.getPatientExercises = async (req, res) => {
   try {
     const [rows] = await pool.query(
-      `SELECT exercise_id, name, video_s3_url 
-       FROM exercises 
-       WHERE status = 'active'`
+      `
+      SELECT exercise_id, title, video_s3_url
+      FROM exercises
+      WHERE status = 'published'
+      `
     );
 
-    const data = rows.map((row) => ({
-      id: row.exercise_id,
-      name: row.name,
-      videoUrl: getSignedUrl(row.video_s3_url),
-    }));
+    const data = await Promise.all(
+      rows.map(async row => ({
+        id: row.exercise_id,
+        title: row.title,
+        videoUrl: await getSignedUrl(row.video_s3_url),
+      }))
+    );
 
     res.json(data);
   } catch (err) {
@@ -80,8 +81,6 @@ exports.getPatientExercises = async (req, res) => {
     res.status(500).json({ message: 'Failed to fetch exercises' });
   }
 };
-
-
 
 
 
@@ -197,28 +196,34 @@ exports.getPatientExercises = async (req, res) => {
   /* =========================
     LIST VIDEOS (EXERCISES)
   ========================= */
-  exports.listVideos = async (req, res) => {
-    const [rows] = await pool.query(`
-    
-      SELECT
-  e.exercise_id,
-  e.title,
-  e.duration_minutes,
-  e.description,
-  e.video_s3_url,
-  e.status,
-  e.created_at,
-  d.name AS uploaded_by
-FROM exercises e
-LEFT JOIN doctors d
-  ON d.doctor_id = e.created_by_id
-ORDER BY e.created_at DESC
+ exports.listVideos = async (req, res) => {
+  const [rows] = await pool.query(
+    `
+    SELECT
+      e.exercise_id,
+      e.title,
+      e.description,
+      e.video_s3_url,
+      e.status,
+      e.created_at,
+      e.created_by_id,
+      pt.name AS tag_name,
+      CASE
+        WHEN e.created_by_id LIKE 'ADMIN%' THEN 'Admin'
+        ELSE d.name
+      END AS uploaded_by
+    FROM exercises e
+    LEFT JOIN doctors d
+      ON d.doctor_id = e.created_by_id
+    LEFT JOIN program_tags pt
+      ON pt.program_tag_id = e.tag_id
+    ORDER BY e.created_at DESC
+    `
+  );
 
+  res.json(rows);
+};
 
-    `);
-
-    res.json(rows);
-  };
 
 
   /* =========================
@@ -367,32 +372,57 @@ ORDER BY e.created_at DESC
     CREATE VIDEO
   ========================= */
   exports.createVideo = async (req, res) => {
-    const {
-      title,
-      duration = '',
-      category = '',
-      description = '',
-      videoUrl = '',
-    } = req.body;
+  const {
+    title,
+    description,
+    tag_id,
+    video_s3_url
+  } = req.body;
 
-    if (!title) {
-      return res.status(400).json({ message: 'Title required' });
-    }
+  if (!title || !tag_id) {
+    return res.status(400).json({
+      message: 'Title and tag are required'
+    });
+  }
 
-    const videoId = await generateCustomId('EX');
+  try {
+    const exerciseId = await generateCustomId('EXERCISE');
 
     await pool.query(
-    `
-    INSERT INTO exercises
-    (exercise_id, title, duration, category, description, video_url, status, created_by)
-    VALUES (?, ?, ?, ?, ?, ?, 'draft', ?)
-    `,
-    [videoId, title, duration, category, description, videoUrl, req.user.userId]
-  );
+      `
+      INSERT INTO exercises
+      (
+        exercise_id,
+        title,
+        description,
+        tag_id,
+        video_s3_url,
+        status,
+        created_by_id
+      )
+      VALUES (?, ?, ?, ?, ?, 'draft', ?)
+      `,
+      [
+        exerciseId,
+        title,
+        description || null,
+        tag_id,
+        video_s3_url || null,
+        req.user.userId // 👈 ADMINxxxx
+      ]
+    );
 
+    res.status(201).json({
+      message: 'Video created successfully',
+      exerciseId
+    });
 
-    res.status(201).json({ message: 'Video created', videoId });
-  };
+  } catch (err) {
+    console.error('ADMIN CREATE VIDEO ERROR:', err);
+    res.status(500).json({ message: 'Failed to create video' });
+  }
+};
+
 
 
 // admin.controller.js
@@ -415,20 +445,31 @@ exports.updateProgramStatus = async (req, res) => {
   /* =========================
     UPDATE VIDEO
   ========================= */
-  exports.updateVideo = async (req, res) => {
-    const { title, duration, category, description, videoUrl } = req.body;
+exports.updateVideo = async (req, res) => {
+  const { title, description, tag_id, video_s3_url } = req.body;
 
-    await pool.query(
-      `
-      UPDATE exercises
-      SET title=?, duration=?, category=?, description=?, video_url=?
-      WHERE exercise_id=?
-      `,
-      [title, duration, category, description, videoUrl, req.params.id]
-    );
+  await pool.query(
+    `
+    UPDATE exercises
+    SET
+      title = ?,
+      description = ?,
+      tag_id = ?,
+      video_s3_url = ?
+    WHERE exercise_id = ?
+    `,
+    [
+      title,
+      description,
+      tag_id,
+      video_s3_url,
+      req.params.id
+    ]
+  );
 
-    res.json({ message: 'Video updated' });
-  };
+  res.json({ message: 'Video updated' });
+};
+
 
 
   /* =========================
@@ -448,3 +489,21 @@ exports.updateProgramStatus = async (req, res) => {
 
     res.json({ message: 'Status updated' });
   };
+
+
+exports.uploadPatientPhoto = async (req, res) => {
+  const { patientId } = req.params;
+
+  if (!req.file || !patientId) {
+    return res.status(400).json({ message: 'Patient ID and photo required' });
+  }
+
+  const s3Key = await uploadToS3(req.file, 'patients');
+
+  await pool.query(
+    `UPDATE patients SET photo_url = ? WHERE patient_id = ?`,
+    [s3Key, patientId]
+  );
+
+  res.json({ message: 'Photo uploaded', s3Key });
+};

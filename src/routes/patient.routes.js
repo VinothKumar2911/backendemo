@@ -1,117 +1,171 @@
-    const express = require('express');
-    const router = express.Router();
-    const {
-  uploadPatientPhoto,
-} = require('../middleware/upload.middleware');
+// const express = require('express');
+// const router = express.Router();
+// const { uploadPatientPhoto } = require('../middleware/upload.middleware');
+// const upload = require('../middleware/upload.middleware');
+// // const patientController = require('../controllers/patient.controller');
+// const upload = require('../middleware/upload.middleware');
 
 
-    const patientController = require('../controllers/patient.controller');
-    const {
-      verifyToken,
-      allowPatient,
-    } = require('../middleware/auth.middleware');
+// const patientController = require('../controllers/patient.controller');
+// const {
+//   verifyToken,
+//   allowPatient,
+// } = require('../middleware/auth.middleware');
 
-    // 🔹 DASHBOARD (Programs + Exercises)
-    router.get(
-      '/dashboard',
-      verifyToken,
-      allowPatient,
-      patientController.getPatientDashboard
-    );
+// // 🔹 DASHBOARD (Programs + Exercises)
+// router.get(
+//   '/dashboard',
+//   verifyToken,
+//   allowPatient,
+//   patientController.getPatientDashboard
+// );
 
-    // 🔹 VIDEO STREAM
-    router.get(
-      '/exercise/:exerciseId/video',
-      verifyToken,
-      allowPatient,
-      patientController.getExerciseVideo
-    );
+// // 🔹 VIDEO STREAM
+// router.get(
+//   '/exercise/:exerciseId/video',
+//   verifyToken,
+//   allowPatient,
+//   patientController.getExerciseVideo
+// );
 
-    // 🔹 WATCH PROGRESS
-    router.post(
-      '/exercise/progress',
-      verifyToken,
-      allowPatient,
-      patientController.updateExerciseProgress
-    );
+// // 🔹 WATCH PROGRESS
+// router.post(
+//   '/exercise/progress',
+//   verifyToken,
+//   allowPatient,
+//   patientController.updateExerciseProgress
+// );
 
-    // 🔹 FEEDBACK
-    router.post(
-      '/feedback',
-      verifyToken,
-      allowPatient,
-      patientController.submitFeedback
-    );
+// // 🔹 FEEDBACK
+// router.post(
+//   '/feedback',
+//   verifyToken,
+//   allowPatient,
+//   patientController.submitFeedback
+// );
 
-    router.get(
-      '/profile',
-      verifyToken,
-      allowPatient,
-      patientController.getPatientProfile
-    );
+// router.get(
+//   '/profile',
+//   verifyToken,
+//   allowPatient,
+//   patientController.getPatientProfile
+// );
 
-    router.put(
-      '/profile',
-      verifyToken,
-      allowPatient,
-      patientController.updatePatientProfile
-    );
-    router.get(
-      '/program/:programId',
-      verifyToken,
-      allowPatient,
-      patientController.getPatientProgramDetail
-    );
+// router.put(
+//   '/profile',
+//   verifyToken,
+//   allowPatient,
+//   patientController.updatePatientProfile
+// );
+// router.get(
+//   '/program/:programId',
+//   verifyToken,
+//   allowPatient,
+//   patientController.getPatientProgramDetail
+// );
 
 
-    // 🔹 START PROGRAM DAY
-    router.post(
-      '/start-program-day',
-      verifyToken,
-      allowPatient,
-      patientController.startProgramDay
-    );
+// // 🔹 START PROGRAM DAY
+// router.post(
+//   '/start-program-day',
+//   verifyToken,
+//   allowPatient,
+//   patientController.startProgramDay
+// );
 
-    // 🔹 START SESSION
-    router.post(
-      '/start-session',
-      verifyToken,
-      allowPatient,
-      patientController.startSession
-    );
+// // 🔹 START SESSION
+// router.post(
+//   '/start-session',
+//   verifyToken,
+//   allowPatient,
+//   patientController.startSession
+// );
 
-    // 🔹 COMPLETE SESSION
-    router.post(
-      '/complete-session',
-      verifyToken,
-      allowPatient,
-      patientController.completeSession
-    );
+// // 🔹 COMPLETE SESSION
+// router.post(
+//   '/complete-session',
+//   verifyToken,
+//   allowPatient,
+//   patientController.completeSession
+// );
 
-    // 🔹 COMPLETE EXERCISE
-    router.post(
-      '/complete-exercise',
-      verifyToken,
-      allowPatient,
-      patientController.completeExercise
-    );
+// // 🔹 COMPLETE EXERCISE
+// router.post(
+//   '/complete-exercise',
+//   verifyToken,
+//   allowPatient,
+//   patientController.completeExercise
+// );
 
-  router.get(
-    '/exercise/:exerciseId',
-    verifyToken,
-    allowPatient,
-    patientController.getExerciseDetail
-  );
-// router.get('/patient/exercises', verifyToken,
-//     allowPatient, getPatientExercises);
+// router.get(
+//   '/exercise/:exerciseId',
+//   verifyToken,
+//   allowPatient,
+//   patientController.getExerciseDetail
+// );
+// // router.get('/patient/exercises', verifyToken,
+// //     allowPatient, getPatientExercises);
 
+// router.put(
+//   '/profile/photo',
+//   verifyToken,
+//   allowPatient,
+//   upload.single('photo'),
+
+//   patientController.updatePatientPhoto
+// );
+
+// router.post(
+//   '/patients/photo',
+//   verifyToken,
+//   allowPatient,
+//   upload.single('photo'),
+//   patientController.uploadPatientPhoto
+// );
+
+
+// module.exports = router;
+
+
+
+
+
+const express = require('express');
+const router = express.Router();
+
+const upload = require('../middleware/upload.middleware');
+const patientController = require('../controllers/patient.controller');
+const { verifyToken, allowPatient } = require('../middleware/auth.middleware');
+
+// DASHBOARD
+router.get('/dashboard', verifyToken, allowPatient, patientController.getPatientDashboard);
+
+// EXERCISE
+router.get('/exercise/:exerciseId/video', verifyToken, allowPatient, patientController.getExerciseVideo);
+router.get('/exercise/:exerciseId', verifyToken, allowPatient, patientController.getExerciseDetail);
+router.post('/exercise/progress', verifyToken, allowPatient, patientController.updateExerciseProgress);
+router.post('/complete-exercise', verifyToken, allowPatient, patientController.completeExercise);
+
+// PROGRAM
+router.get('/program/:programId', verifyToken, allowPatient, patientController.getPatientProgramDetail);
+router.post('/start-program-day', verifyToken, allowPatient, patientController.startProgramDay);
+router.post('/start-session', verifyToken, allowPatient, patientController.startSession);
+router.post('/complete-session', verifyToken, allowPatient, patientController.completeSession);
+
+// FEEDBACK
+router.post('/feedback', verifyToken, allowPatient, patientController.submitFeedback);
+
+// PROFILE
+router.get('/profile', verifyToken, allowPatient, patientController.getPatientProfile);
+router.put('/profile', verifyToken, allowPatient, patientController.updatePatientProfile);
+
+// PHOTO (ONLY ONE)
 router.put(
   '/profile/photo',
   verifyToken,
   allowPatient,
-  uploadPatientPhoto.single('photo'),
+  upload.single('photo'),
   patientController.updatePatientPhoto
 );
 
-
-    module.exports = router;
+module.exports = router;

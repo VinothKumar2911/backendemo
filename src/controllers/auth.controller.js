@@ -23,6 +23,9 @@ function normalizePhone(phone) {
  */
 exports.sendOtp = async (req, res) => {
   try {
+      if (!req.body.phone) {
+      return res.status(400).json({ message: 'Phone number required' });
+    }
     const phone = normalizePhone(req.body.phone);
 
     const [[user]] = await pool.query(
@@ -52,6 +55,7 @@ exports.sendOtp = async (req, res) => {
     res.status(500).json({ message: 'Server error' });
   }
 };
+
 
 
 exports.verifyOtp = async (req, res) => {
@@ -147,7 +151,7 @@ exports.createSupportRequest = async (req, res) => {
       return res.status(400).json({ message: 'All fields are required' });
     }
 
-    const phoneNormalized = phone.replace(/\D/g, '');
+    const phoneNormalized = normalizePhone(phone);
     if (phoneNormalized.length < 10) {
       return res.status(400).json({ message: 'Invalid phone number' });
     }

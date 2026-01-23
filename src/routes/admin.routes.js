@@ -52,9 +52,12 @@
 // module.exports = router;
 
 
+
+
+
 const express = require('express');
 const router = express.Router();
-
+const upload = require('../middleware/upload.middleware');
 const adminController = require('../controllers/admin.controller');
 const { verifyToken, allowAdmin } = require('../middleware/auth.middleware');
 
@@ -180,7 +183,14 @@ router.patch(
   allowAdmin,
   adminController.updateProgramStatus
 );
-// router.get('/patient/exercises',verifyToken,
-//   allowAdmin,getPatientExercises);
+router.post(
+  '/patients/:patientId/photo',
+  verifyToken,
+  allowAdmin,
+  upload.single('photo'),
+  adminController.uploadPatientPhoto
+);
+
+
 
 module.exports = router;
