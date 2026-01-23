@@ -71,12 +71,13 @@
 
 
 
-
 const express = require('express');
 const app = express();
 
+// middlewares
 app.use(express.json());
 
+// health check
 app.get('/', (req, res) => {
   res.json({
     status: 'ok',
@@ -84,14 +85,11 @@ app.get('/', (req, res) => {
   });
 });
 
+// routes (enable when ready)
+// const authRoutes = require('./routes/auth.routes');
+// const doctorRoutes = require('./routes/doctor.routes');
+// const patientRoutes = require('./routes/patient.routes');
 
-// const express = require('express');
-// const app = express();
-
-// middlewares
-app.use(express.json());
-
-// routes
 // app.use('/auth', authRoutes);
 // app.use('/doctor', doctorRoutes);
 // app.use('/patient', patientRoutes);
