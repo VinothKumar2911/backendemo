@@ -71,27 +71,27 @@
 
 
 
-const express = require('express');
-const app = express();
+  const express = require('express');
+  const app = express();
 
-// middlewares
-app.use(express.json());
+  // middlewares
+  app.use(express.json());
 
-// health check
-app.get('/', (req, res) => {
-  res.json({
-    status: 'ok',
-    service: 'hospital-backend',
+  // health check
+  app.get('/', (req, res) => {
+    res.json({
+      status: 'ok',
+      service: 'hospital-backend',
+    });
   });
-});
 
-// routes (enable when ready)
-// const authRoutes = require('./routes/auth.routes');
-// const doctorRoutes = require('./routes/doctor.routes');
-// const patientRoutes = require('./routes/patient.routes');
+  // routes (enable when ready)
+  // const authRoutes = require('./routes/auth.routes');
+  // const doctorRoutes = require('./routes/doctor.routes');
+  // const patientRoutes = require('./routes/patient.routes');
 
-// app.use('/auth', authRoutes);
-// app.use('/doctor', doctorRoutes);
-// app.use('/patient', patientRoutes);
+  // app.use('/auth', authRoutes);
+  // app.use('/doctor', doctorRoutes);
+  // app.use('/patient', patientRoutes);
 
-module.exports = app;
+  module.exports = app;
