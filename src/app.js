@@ -68,21 +68,26 @@
 
 // module.exports = app;
 
-
-
 const express = require('express');
 const cors = require('cors');
+
+const authRoutes = require('./routes/auth.routes');
+const doctorRoutes = require('./routes/doctor.routes');
+const patientRoutes = require('./routes/patient.routes');
+const adminRoutes = require('./routes/admin.routes');
 
 const app = express();
 
 app.use(express.json());
-app.use(cors());
+app.use(cors({ origin: '*' }));
 
 app.get('/', (req, res) => {
-  res.json({
-    status: 'ok',
-    service: 'hospital-backend'
-  });
+  res.json({ status: 'ok', message: 'Backend running successfully' });
 });
+
+app.use('/auth', authRoutes);
+app.use('/doctor', doctorRoutes);
+app.use('/patient', patientRoutes);
+app.use('/admin', adminRoutes);
 
 module.exports = app;
