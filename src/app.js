@@ -69,29 +69,50 @@
 // module.exports = app;
 
 
+// src/app.js
+const express = require('express');
+const cors = require('cors');
 
+const authRoutes = require('./routes/auth.routes');
+const doctorRoutes = require('./routes/doctor.routes');
+const patientRoutes = require('./routes/patient.routes');
+const adminRoutes = require('./routes/admin.routes');
 
-  const express = require('express');
-  const app = express();
+const app = express();
 
-  // middlewares
-  app.use(express.json());
+/* =========================
+   MIDDLEWARE
+========================= */
+app.use(express.json());
+app.use(cors({
+  origin: '*',
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+}));
 
-  // health check
-  app.get('/', (req, res) => {
-    res.json({
-      status: 'ok',
-      service: 'hospital-backend',
-    });
+/* =========================
+   HEALTH CHECK
+========================= */
+app.get('/', (req, res) => {
+  res.json({
+    status: 'ok',
+    message: 'Hospital backend running (Lambda)',
   });
+});
 
-  // routes (enable when ready)
-  // const authRoutes = require('./routes/auth.routes');
-  // const doctorRoutes = require('./routes/doctor.routes');
-  // const patientRoutes = require('./routes/patient.routes');
+/* =========================
+   ROUTES
+========================= */
+app.use('/auth', authRoutes);
+app.use('/doctor', doctorRoutes);
+app.use('/patient', patientRoutes);
+app.use('/admin', adminRoutes);
 
-  // app.use('/auth', authRoutes);
-  // app.use('/doctor', doctorRoutes);
-  // app.use('/patient', patientRoutes);
+/* =========================
+   404 HANDLER
+========================= */
+app.use((req, res) => {
+  res.status(404).json({ message: 'Not Found' });
+});
 
-  module.exports = app;
+module.exports = app;
