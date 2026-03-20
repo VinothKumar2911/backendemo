@@ -58,6 +58,12 @@ function normalizePhone(phone) {
 
 exports.sendOtp = async (req, res) => {
   try {
+<<<<<<< HEAD
+=======
+      if (!req.body.phone) {
+      return res.status(400).json({ message: 'Phone number required' });
+    }
+>>>>>>> 103c9bbb15e3a1583e23ffa425468851d424cd3a
     const phone = normalizePhone(req.body.phone);
 
     const [[user]] = await pool.query(
@@ -69,13 +75,25 @@ exports.sendOtp = async (req, res) => {
       return res.status(404).json({ message: 'Phone number not registered' });
     }
 
+<<<<<<< HEAD
     // 🔹 STATIC OTP MODE — DO NOT TOUCH DB
     if (process.env.OTP_MODE === 'STATIC') {
       return res.json({ message: 'OTP sent successfully' });
     }
+=======
+    // Remove old OTPs
+    await pool.query(`DELETE FROM otp_verification WHERE phone = ?`, [phone]);
+
+    const otp = '1234'; // STATIC OTP
+    const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
+>>>>>>> 103c9bbb15e3a1583e23ffa425468851d424cd3a
 
     // 🔜 MSG91 SEND OTP WILL COME HERE LATER
 
+<<<<<<< HEAD
+=======
+    res.json({ message: 'OTP sent successfully' });
+>>>>>>> 103c9bbb15e3a1583e23ffa425468851d424cd3a
   } catch (err) {
     console.error('SEND OTP ERROR:', err);
     res.status(500).json({ message: 'Server error' });
@@ -93,6 +111,7 @@ exports.verifyOtp = async (req, res) => {
       return res.status(400).json({ message: 'OTP required' });
     }
 
+<<<<<<< HEAD
     // const [[otpRow]] = await pool.query(
     //   `SELECT * FROM otp_verification
     //    WHERE phone = ? AND otp = ? AND expires_at > NOW()`,
@@ -114,6 +133,17 @@ if (process.env.OTP_MODE === 'STATIC') {
   // 🔜 MSG91 VERIFY OTP WILL COME HERE
 }
 
+=======
+    const [[otpRow]] = await pool.query(
+      `SELECT * FROM otp_verification
+       WHERE phone = ? AND otp = ? AND expires_at > NOW()`,
+      [phone, otp]
+    );
+
+    if (!otpRow) {
+      return res.status(401).json({ message: 'Invalid or expired OTP' });
+    }
+>>>>>>> 103c9bbb15e3a1583e23ffa425468851d424cd3a
 
     const [[user]] = await pool.query(
       `SELECT id, role FROM users_auth WHERE phone = ?`,
@@ -184,16 +214,34 @@ await pool.query(
 exports.createSupportRequest = async (req, res) => {
   try {
     const { name, age, gender, phone, purpose } = req.body;
+<<<<<<< HEAD
     const phoneNormalized = normalizePhone(phone);
+=======
+>>>>>>> 103c9bbb15e3a1583e23ffa425468851d424cd3a
 
     if (!name || !age || !gender || !phone || !purpose) {
       return res.status(400).json({ message: 'All fields are required' });
     }
 
+<<<<<<< HEAD
     await pool.query(
       `INSERT INTO support_requests (name, age, gender, phone, purpose)
        VALUES (?, ?, ?, ?, ?)`,
       [name, age, gender, phoneNormalized, purpose]
+=======
+    const phoneNormalized = normalizePhone(phone);
+    if (phoneNormalized.length < 10) {
+      return res.status(400).json({ message: 'Invalid phone number' });
+    }
+
+    await pool.query(
+      `
+      INSERT INTO support_requests
+      (name, age, gender, phone, purpose, status)
+      VALUES (?, ?, ?, ?, ?, 'open')
+      `,
+      [name, age, gender, phone, purpose]
+>>>>>>> 103c9bbb15e3a1583e23ffa425468851d424cd3a
     );
 
     res.json({ message: 'Support request created successfully' });
@@ -202,3 +250,9 @@ exports.createSupportRequest = async (req, res) => {
     res.status(500).json({ message: 'Server error' });
   }
 };
+<<<<<<< HEAD
+=======
+
+
+
+>>>>>>> 103c9bbb15e3a1583e23ffa425468851d424cd3a

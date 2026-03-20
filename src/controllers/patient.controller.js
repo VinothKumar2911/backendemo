@@ -1,6 +1,11 @@
 
 const pool = require('../config/db');
 const { generateCustomId } = require('../utils/idGenerator');
+<<<<<<< HEAD
+=======
+const { uploadToS3, getSignedUrl } = require('../config/s3');
+const upload = require('../middleware/upload.middleware');
+>>>>>>> 103c9bbb15e3a1583e23ffa425468851d424cd3a
 
 
 /* =========================
@@ -16,6 +21,9 @@ exports.submitFeedback = async (req, res) => {
       [req.user.userId]
     );
 
+    if (!patient) {
+      return res.status(404).json({ message: 'Patient not found' });
+    }
     const [[existing]] = await pool.query(
       `
       SELECT feedback_id FROM feedback
@@ -56,6 +64,31 @@ exports.submitFeedback = async (req, res) => {
     res.status(500).json({ message: 'Feedback failed' });
   }
 };
+
+
+// exports.uploadPatientPhoto = async (req, res) => {
+//   if (!req.file) {
+//     return res.status(400).json({ message: 'No file uploaded' });
+//   }
+
+//   const s3Key = await uploadToS3(req.file, 'patients');
+
+//   const [[patient]] = await pool.query(
+//   `SELECT patient_id FROM patients WHERE user_auth_id = ?`,
+//   [req.user.userId]
+// );
+// if (!patient) {
+//   return res.status(404).json({ message: 'Patient not found' });
+// }
+
+// await pool.query(
+//   `UPDATE patients SET photo_url=? WHERE patient_id=?`,
+//   [s3Key, patient.patient_id]
+// );
+
+
+//   res.json({ message: 'Photo uploaded', s3Key });
+// };
 
 /* =========================
    UPDATE EXERCISE PROGRESS
@@ -117,6 +150,12 @@ exports.updateExerciseProgress = async (req, res) => {
 ========================= */
 exports.getPatientDashboard = async (req, res) => {
   try {
+<<<<<<< HEAD
+=======
+    // =========================
+    // 0️⃣ GET PATIENT
+    // =========================
+>>>>>>> 103c9bbb15e3a1583e23ffa425468851d424cd3a
     const [[patient]] = await pool.query(
       `SELECT patient_id, name FROM patients WHERE user_auth_id = ?`,
       [req.user.userId]
@@ -126,6 +165,7 @@ exports.getPatientDashboard = async (req, res) => {
       return res.status(404).json({ message: 'Patient not found' });
     }
 
+<<<<<<< HEAD
   
 
 
@@ -243,15 +283,194 @@ todayExercises: exerciseRows.map(e => ({
   activePrograms: activeProgramsRows,
 });
 
+=======
+    // =========================
+    // 1️⃣ GET ACTIVE PROGRAMS
+    // =========================
+    const [activePrograms] = await pool.query(
+      `
+      SELECT
+        pp.patient_program_id,
+        pp.program_id,
+        pr.name AS program_name,
+        pp.total_program_days
+      FROM patient_programs pp
+      JOIN programs pr ON pr.program_id = pp.program_id
+      WHERE pp.patient_id = ?
+        AND pp.status = 'active'
+      `,
+      [patient.patient_id]
+    );
+
+    // 🔹 NO ACTIVE PROGRAM
+    if (activePrograms.length === 0) {
+      return res.json({
+        patientName: patient.name,
+        programDayId: null,
+        session: null,
+        todaySummary: { total: 0, completed: 0 },
+        todayExercises: [],
+        activePrograms: [],
+      });
+    }
+
+    // =========================
+    // 2️⃣ PICK CURRENT PROGRAM
+    // =========================
+    const program = activePrograms[0];
+
+    // =========================
+    // 3️⃣ GET ACTIVE PROGRAM DAY
+    // =========================
+    let [[programDay]] = await pool.query(
+      `
+     SELECT *
+FROM patient_program_days
+WHERE patient_program_id = ?
+ORDER BY created_at DESC
+LIMIT 1;
+
+      `,
+      [program.patient_program_id]
+    );
+
+    // =========================
+    // 4️⃣ AUTO-START DAY (IF NONE)
+    // =========================
+    if (!programDay) {
+      const fakeReq = {
+        body: { patient_program_id: program.patient_program_id },
+        user: req.user,
+      };
+
+      const fakeRes = {
+        json: (d) => d,
+        status: () => fakeRes,
+      };
+
+      const day = await exports.startProgramDay(fakeReq, fakeRes);
+
+      if (!day || !day.program_day_id) {
+        return res.json({
+          patientName: patient.name,
+          programDayId: null,
+          session: null,
+          todaySummary: { total: 0, completed: 0 },
+          todayExercises: [],
+          activePrograms,
+        });
+      }
+
+      [[programDay]] = await pool.query(
+        `SELECT * FROM patient_program_days WHERE id = ?`,
+        [day.program_day_id]
+      );
+    }
+
+    // 🔹 FINAL SAFETY CHECK
+    if (!programDay || !programDay.id) {
+      return res.json({
+        patientName: patient.name,
+        programDayId: null,
+        session: null,
+        todaySummary: { total: 0, completed: 0 },
+        todayExercises: [],
+        activePrograms,
+      });
+    }
+
+    // =========================
+    // 5️⃣ GET ACTIVE SESSION
+    // =========================
+    const [[session]] = await pool.query(
+      `
+      SELECT *
+      FROM patient_sessions
+      WHERE patient_program_day_id = ?
+        AND status = 'started'
+      ORDER BY started_at DESC
+      LIMIT 1
+      `,
+      [programDay.id]
+    );
+
+    // =========================
+    // 6️⃣ LOAD EXERCISES (ONLY IF SESSION EXISTS)
+    // =========================
+    let exerciseRows = [];
+
+    if (session) {
+      const [rows] = await pool.query(
+        `
+        SELECT
+          e.exercise_id,
+          e.title,
+          e.video_s3_url,
+          e.duration_minutes,
+          pe.order_no,
+          CASE
+            WHEN px.patient_exercise_id IS NOT NULL THEN TRUE
+            ELSE FALSE
+          END AS completed
+        FROM program_exercises pe
+        JOIN exercises e ON e.exercise_id = pe.exercise_id
+        LEFT JOIN patient_exercises px
+          ON px.exercise_id = e.exercise_id
+         AND px.session_id = ?
+        WHERE pe.program_id = ?
+        ORDER BY pe.order_no
+        `,
+        [session.session_id, program.program_id]
+      );
+
+     exerciseRows = await Promise.all(
+  rows.map(async e => ({
+    id: e.exercise_id,
+    program_id: program.program_id,
+    program_name: program.program_name,
+    title: e.title,
+    videoUrl: await getSignedUrl(e.video_s3_url),
+    completed: e.completed,
+    duration: e.duration_minutes,
+  }))
+);
+
+    }
+
+    // =========================
+    // 7️⃣ FINAL RESPONSE
+    // =========================
+    return res.json({
+      patientName: patient.name,
+      programDayId: programDay.id,
+      session: session
+        ? {
+            sessionId: session.session_id,
+            sessionNumber: session.session_number,
+          }
+        : null,
+      todaySummary: {
+        total: exerciseRows.length,
+        completed: exerciseRows.filter(e => e.completed).length,
+      },
+      todayExercises: exerciseRows,
+      activePrograms,
+    });
+>>>>>>> 103c9bbb15e3a1583e23ffa425468851d424cd3a
 
   } catch (err) {
-    console.error('PATIENT DASHBOARD ERROR:', err);
-    res.status(500).json({ message: 'Dashboard failed' });
+    console.error('DASHBOARD ERROR:', err);
+    return res.status(500).json({ message: 'Dashboard failed' });
   }
 };
 
 
 
+<<<<<<< HEAD
+=======
+
+
+>>>>>>> 103c9bbb15e3a1583e23ffa425468851d424cd3a
 exports.getExerciseVideo = async (req, res) => {
   res.json({
     message: 'Video streaming will be added via S3 later',
@@ -283,6 +502,7 @@ WHERE user_auth_id = ?
       return res.status(404).json({ message: 'Patient not found' });
     }
 
+<<<<<<< HEAD
 res.json({
   patient_id: patient.patient_id, // 👈 ADD THIS
   name: patient.name,
@@ -294,6 +514,19 @@ res.json({
   status: patient.status,
   created_at: patient.created_at,
 });
+=======
+    res.json({
+      patient_id: patient.patient_id, // 👈 ADD THIS
+      name: patient.name,
+      phone: patient.phone,
+      gender: patient.gender,
+      dob: patient.dob,
+      user_auth_id: patient.user_auth_id,
+      photo_url: patient.photo_url,
+      status: patient.status,
+      created_at: patient.created_at,
+    });
+>>>>>>> 103c9bbb15e3a1583e23ffa425468851d424cd3a
 
 
 
@@ -353,7 +586,19 @@ exports.getPatientProgramDetail = async (req, res) => {
       [programId]
     );
 
+<<<<<<< HEAD
     res.json({ exercises: rows });
+=======
+    const exercises = await Promise.all(
+      rows.map(async e => ({
+        exercise_id: e.exercise_id,
+        title: e.title,
+        videoUrl: await getSignedUrl(e.video_s3_url),
+      }))
+    );
+
+    res.json({ exercises });
+>>>>>>> 103c9bbb15e3a1583e23ffa425468851d424cd3a
 
   } catch (err) {
     console.error('PROGRAM DETAIL ERROR:', err);
@@ -373,6 +618,10 @@ exports.getPatientProgramDetail = async (req, res) => {
 
 
 
+<<<<<<< HEAD
+=======
+
+>>>>>>> 103c9bbb15e3a1583e23ffa425468851d424cd3a
 exports.startProgramDay = async (req, res) => {
   const { patient_program_id } = req.body;
   const conn = await pool.getConnection();
@@ -380,7 +629,10 @@ exports.startProgramDay = async (req, res) => {
   try {
     await conn.beginTransaction();
 
+<<<<<<< HEAD
     // 1️⃣ Get last program day
+=======
+>>>>>>> 103c9bbb15e3a1583e23ffa425468851d424cd3a
     const [[lastDay]] = await conn.query(
       `
       SELECT *
@@ -391,6 +643,7 @@ exports.startProgramDay = async (req, res) => {
       `,
       [patient_program_id]
     );
+<<<<<<< HEAD
 
     const today = new Date().toISOString().slice(0, 10);
 
@@ -407,6 +660,24 @@ exports.startProgramDay = async (req, res) => {
     }
 
     // 3️⃣ Get program config
+=======
+const [[todayDay]] = await conn.query(
+  `
+  SELECT *
+  FROM patient_program_days
+  WHERE patient_program_id = ?
+  AND calendar_date = CURDATE()
+  LIMIT 1
+  `,
+  [patient_program_id]
+);
+
+if (todayDay) {
+  await conn.rollback();
+  return todayDay; // 🔥 IMPORTANT
+}
+
+>>>>>>> 103c9bbb15e3a1583e23ffa425468851d424cd3a
     const [[pp]] = await conn.query(
       `
       SELECT sessions_per_day, total_program_days
@@ -417,6 +688,7 @@ exports.startProgramDay = async (req, res) => {
     );
 
     if (!pp) {
+<<<<<<< HEAD
       return res.status(404).json({ message: 'Patient program not found' });
     }
 
@@ -430,18 +702,33 @@ exports.startProgramDay = async (req, res) => {
     }
 
     // 5️⃣ Decide next day number
+=======
+      await conn.rollback();
+      return res.status(404).json({ message: 'Program not found' });
+    }
+
+    if (lastDay && lastDay.status === 'completed' && lastDay.program_day >= pp.total_program_days) {
+      await conn.rollback();
+      return res.status(400).json({ message: 'Program completed' });
+    }
+
+>>>>>>> 103c9bbb15e3a1583e23ffa425468851d424cd3a
     const programDay = lastDay
       ? lastDay.status === 'completed'
         ? lastDay.program_day + 1
         : lastDay.program_day
       : 1;
 
+<<<<<<< HEAD
     // 6️⃣ Create new day
+=======
+>>>>>>> 103c9bbb15e3a1583e23ffa425468851d424cd3a
     const programDayId = await generateCustomId('PROGRAM_DAY');
 
     await conn.query(
       `
       INSERT INTO patient_program_days
+<<<<<<< HEAD
       (
         id,
         patient_program_id,
@@ -451,12 +738,16 @@ exports.startProgramDay = async (req, res) => {
         completed_sessions,
         status
       )
+=======
+      (id, patient_program_id, program_day, calendar_date, required_sessions, completed_sessions, status)
+>>>>>>> 103c9bbb15e3a1583e23ffa425468851d424cd3a
       VALUES (?, ?, ?, CURDATE(), ?, 0, 'in_progress')
       `,
       [programDayId, patient_program_id, programDay, pp.sessions_per_day]
     );
 
     await conn.commit();
+<<<<<<< HEAD
 
     res.json({
       program_day_id: programDayId,
@@ -466,6 +757,20 @@ exports.startProgramDay = async (req, res) => {
   } catch (err) {
     await conn.rollback();
     console.error('START PROGRAM DAY ERROR:', err);
+=======
+   const response = { program_day_id: programDayId, program_day: programDay };
+
+if (res && typeof res.json === 'function') {
+  res.json(response);
+}
+return response;
+
+
+
+  } catch (err) {
+    await conn.rollback();
+    console.error(err);
+>>>>>>> 103c9bbb15e3a1583e23ffa425468851d424cd3a
     res.status(500).json({ message: err.message });
   } finally {
     conn.release();
@@ -473,6 +778,7 @@ exports.startProgramDay = async (req, res) => {
 };
 
 
+<<<<<<< HEAD
 
 exports.startSession = async (req, res) => {
   const { patient_program_day_id, session_type } = req.body;
@@ -495,6 +801,45 @@ exports.startSession = async (req, res) => {
 
     if (exists) {
       return res.status(400).json({ message: 'Session already started' });
+=======
+exports.startSession = async (req, res) => {
+  const { patient_program_day_id } = req.body;
+  const conn = await pool.getConnection();
+
+  try {
+    await conn.beginTransaction();
+
+    const [[day]] = await conn.query(
+      `
+      SELECT completed_sessions, required_sessions
+      FROM patient_program_days
+      WHERE id = ?
+      `,
+      [patient_program_day_id]
+    );
+if (!day) {
+  await conn.rollback();
+  return res.status(404).json({ message: 'Program day not found' });
+}
+
+    const nextSessionNumber = day.completed_sessions + 1;
+    if (nextSessionNumber > day.required_sessions) {
+      await conn.rollback();
+      return res.status(400).json({ message: 'All sessions completed' });
+    }
+
+    const [[active]] = await conn.query(
+      `
+      SELECT session_id FROM patient_sessions
+      WHERE patient_program_day_id = ? AND status = 'started'
+      `,
+      [patient_program_day_id]
+    );
+
+    if (active) {
+      await conn.rollback();
+      return res.status(400).json({ message: 'Complete current session first' });
+>>>>>>> 103c9bbb15e3a1583e23ffa425468851d424cd3a
     }
 
     const sessionId = await generateCustomId('SESSION');
@@ -505,6 +850,7 @@ exports.startSession = async (req, res) => {
       (session_id, patient_program_day_id, session_number, status, started_at)
       VALUES (?, ?, ?, 'started', NOW())
       `,
+<<<<<<< HEAD
       [sessionId, patient_program_day_id, session_type]
     );
 
@@ -522,6 +868,19 @@ exports.startSession = async (req, res) => {
     });
   }
   finally {
+=======
+      [sessionId, patient_program_day_id, nextSessionNumber]
+    );
+
+    await conn.commit();
+    res.json({ session_id: sessionId, session_number: nextSessionNumber });
+
+  } catch (err) {
+    await conn.rollback();
+    console.error(err);
+    res.status(500).json({ message: err.message });
+  } finally {
+>>>>>>> 103c9bbb15e3a1583e23ffa425468851d424cd3a
     conn.release();
   }
 };
@@ -607,11 +966,49 @@ exports.completeExercise = async (req, res) => {
 
 exports.completeSession = async (req, res) => {
   const { session_id, patient_program_day_id } = req.body;
+<<<<<<< HEAD
 
   const conn = await pool.getConnection();
   try {
     await conn.beginTransaction();
 
+=======
+  const conn = await pool.getConnection();
+
+
+  try {
+    await conn.beginTransaction();
+
+    const [[session]] = await conn.query(
+      `
+      SELECT ps.session_id, pp.program_id
+      FROM patient_sessions ps
+      JOIN patient_program_days ppd ON ppd.id = ps.patient_program_day_id
+      JOIN patient_programs pp ON pp.patient_program_id = ppd.patient_program_id
+      WHERE ps.session_id = ?
+      `,
+      [session_id]
+    );
+    if (!session) {
+      await conn.rollback();
+      return res.status(404).json({ message: 'Session not found' });
+    }
+    const [[done]] = await conn.query(
+      `SELECT COUNT(*) AS done FROM patient_exercises WHERE session_id = ?`,
+      [session_id]
+    );
+
+    const [[required]] = await conn.query(
+      `SELECT COUNT(*) AS total FROM program_exercises WHERE program_id = ?`,
+      [session.program_id]
+    );
+
+    if (done.done < required.total) {
+      await conn.rollback();
+      return res.status(400).json({ message: 'Complete all exercises first' });
+    }
+
+>>>>>>> 103c9bbb15e3a1583e23ffa425468851d424cd3a
     await conn.query(
       `
       UPDATE patient_sessions
@@ -630,13 +1027,20 @@ exports.completeSession = async (req, res) => {
       [patient_program_day_id]
     );
 
+<<<<<<< HEAD
     // Check if day is completed
+=======
+>>>>>>> 103c9bbb15e3a1583e23ffa425468851d424cd3a
     await conn.query(
       `
       UPDATE patient_program_days
       SET status = 'completed'
       WHERE id = ?
+<<<<<<< HEAD
       AND completed_sessions >= required_sessions
+=======
+        AND completed_sessions >= required_sessions
+>>>>>>> 103c9bbb15e3a1583e23ffa425468851d424cd3a
       `,
       [patient_program_day_id]
     );
@@ -646,17 +1050,31 @@ exports.completeSession = async (req, res) => {
 
   } catch (err) {
     await conn.rollback();
+<<<<<<< HEAD
     res.status(500).json({ message: 'Failed to complete session' });
+=======
+    console.error(err);
+    res.status(500).json({ message: err.message });
+>>>>>>> 103c9bbb15e3a1583e23ffa425468851d424cd3a
   } finally {
     conn.release();
   }
 };
 
 
+<<<<<<< HEAD
+=======
+
+
+>>>>>>> 103c9bbb15e3a1583e23ffa425468851d424cd3a
 exports.getExerciseDetail = async (req, res) => {
   try {
     const { exerciseId } = req.params;
 
+<<<<<<< HEAD
+=======
+    /* 1️⃣ Get patient */
+>>>>>>> 103c9bbb15e3a1583e23ffa425468851d424cd3a
     const [[patient]] = await pool.query(
       `SELECT patient_id FROM patients WHERE user_auth_id = ?`,
       [req.user.userId]
@@ -666,6 +1084,7 @@ exports.getExerciseDetail = async (req, res) => {
       return res.status(404).json({ message: 'Patient not found' });
     }
 
+<<<<<<< HEAD
     const [[exercise]] = await pool.query(
       `
     SELECT
@@ -726,16 +1145,167 @@ res.json({
 
   } catch (err) {
     console.error(err);
+=======
+    /* 2️⃣ Fetch exercise + tag (tag_id based) */
+    const [[exercise]] = await pool.query(
+      `
+      SELECT
+        e.exercise_id,
+        e.title,
+        e.video_s3_url,
+        e.description,
+        e.updated_at,
+        pt.name AS tag_name,
+        d.name AS updated_by,
+        ppd.calendar_date AS assigned_date,
+        pp.total_program_days
+      FROM exercises e
+
+      JOIN program_exercises pe
+        ON pe.exercise_id = e.exercise_id
+
+      JOIN patient_programs pp
+        ON pp.program_id = pe.program_id
+
+      JOIN patients p
+        ON p.patient_id = pp.patient_id
+
+      JOIN patient_program_days ppd
+        ON ppd.patient_program_id = pp.patient_program_id
+
+      LEFT JOIN program_tags pt
+        ON pt.program_tag_id = e.tag_id
+
+      LEFT JOIN doctors d
+        ON d.doctor_id = p.assigned_doctor_id
+
+      WHERE e.exercise_id = ?
+        AND p.patient_id = ?
+
+      ORDER BY ppd.created_at DESC
+      LIMIT 1
+      `,
+      [exerciseId, patient.patient_id]
+    );
+
+    if (!exercise) {
+      return res.status(404).json({ message: 'Exercise not found' });
+    }
+
+    /* 3️⃣ Response */
+    res.json({
+      exerciseId: exercise.exercise_id,
+      title: exercise.title,
+      description: exercise.description,
+      tag: exercise.tag_name || null,
+      videoUrl: await getSignedUrl(exercise.video_s3_url),
+      assignedDate: exercise.assigned_date,
+      updatedBy: exercise.updated_by,
+      updatedOn: exercise.assigned_date,
+      totalProgramDays: exercise.total_program_days
+    });
+
+  } catch (err) {
+    console.error('GET EXERCISE DETAIL ERROR:', err);
+>>>>>>> 103c9bbb15e3a1583e23ffa425468851d424cd3a
     res.status(500).json({ message: 'Failed to load exercise detail' });
   }
 };
 
+<<<<<<< HEAD
+=======
+
+// exports.getExerciseDetail = async (req, res) => {
+//   try {
+//     const { exerciseId } = req.params;
+
+//     const [[patient]] = await pool.query(
+//       `SELECT patient_id FROM patients WHERE user_auth_id = ?`,
+//       [req.user.userId]
+//     );
+
+//     if (!patient) {
+//       return res.status(404).json({ message: 'Patient not found' });
+//     }
+
+//     const [[exercise]] = await pool.query(
+//       `
+//     SELECT
+//   e.exercise_id,
+//   e.title,
+//   e.video_s3_url,
+//   e.description,
+//   e.updated_at,
+//   d.name AS updated_by,
+//   ppd.calendar_date AS assigned_date,
+//   pp.total_program_days
+// FROM exercises e
+// JOIN program_exercises pe ON pe.exercise_id = e.exercise_id
+// JOIN patient_programs pp ON pp.program_id = pe.program_id
+// JOIN patients p ON p.patient_id = pp.patient_id
+// JOIN patient_program_days ppd ON ppd.patient_program_id = pp.patient_program_id
+// LEFT JOIN doctors d ON d.doctor_id = p.assigned_doctor_id
+// WHERE e.exercise_id = ?
+// AND p.patient_id = ?
+
+// ORDER BY ppd.created_at DESC
+// LIMIT 1
+
+
+//       `,
+//       [exerciseId, patient.patient_id]
+//     );
+
+//     let tags = [];
+
+//     try {
+//       const [rows] = await pool.query(
+//         `
+//     SELECT t.tag_name
+//     FROM exercise_tags et
+//     JOIN tags t ON t.tag_id = et.tag_id
+//     WHERE et.exercise_id = ?
+//     `,
+//         [exerciseId]
+//       );
+
+//       tags = rows.map(r => r.tag_name);
+//     } catch (err) {
+//       // Table doesn't exist OR no tags — that's OK
+//       console.warn('exercise_tags table missing or empty');
+//     }
+// if (!exercise) {
+//   return res.status(404).json({ message: 'Exercise not found' });
+// }
+
+//     res.json({
+//       exerciseId: exercise.exercise_id,
+//       title: exercise.title,
+//       videoUrl: await getSignedUrl(exercise.video_s3_url),
+
+//       description: exercise.description,
+//       assignedDate: exercise.assigned_date,
+//       updatedBy: exercise.updated_by,
+//       updatedOn: exercise.assigned_date, // 👈 same date
+//       totalProgramDays: exercise.total_program_days,
+//       tags
+//     });
+
+
+//   } catch (err) {
+//     console.error(err);
+//     res.status(500).json({ message: 'Failed to load exercise detail' });
+//   }
+// };
+
+>>>>>>> 103c9bbb15e3a1583e23ffa425468851d424cd3a
 exports.updatePatientPhoto = async (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({ message: 'No photo uploaded' });
     }
 
+<<<<<<< HEAD
     const photoUrl = `/uploads/patients/${req.file.filename}`;
 
     await pool.query(
@@ -745,11 +1315,22 @@ exports.updatePatientPhoto = async (req, res) => {
       WHERE user_auth_id = ?
       `,
       [photoUrl, req.user.userId]
+=======
+    const s3Key = await uploadToS3(req.file, 'patients');
+
+    await pool.query(
+      `UPDATE patients SET photo_url = ? WHERE user_auth_id = ?`,
+      [s3Key, req.user.userId]
+>>>>>>> 103c9bbb15e3a1583e23ffa425468851d424cd3a
     );
 
     res.json({
       message: 'Photo updated',
+<<<<<<< HEAD
       photo: photoUrl,
+=======
+      photo_url: s3Key,
+>>>>>>> 103c9bbb15e3a1583e23ffa425468851d424cd3a
     });
 
   } catch (err) {
@@ -757,3 +1338,36 @@ exports.updatePatientPhoto = async (req, res) => {
     res.status(500).json({ message: 'Photo update failed' });
   }
 };
+<<<<<<< HEAD
+=======
+
+
+
+
+
+
+exports.getPatientExercises = async (req, res) => {
+  try {
+    const [rows] = await pool.query(
+      `
+      SELECT exercise_id, title, video_s3_url
+      FROM exercises
+      WHERE status = 'published'
+      `
+    );
+
+    const data = await Promise.all(
+      rows.map(async row => ({
+        id: row.exercise_id,
+        title: row.title,
+        videoUrl: await getSignedUrl(row.video_s3_url),
+      }))
+    );
+
+    res.json(data);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'Failed to fetch exercises' });
+  }
+};
+>>>>>>> 103c9bbb15e3a1583e23ffa425468851d424cd3a
