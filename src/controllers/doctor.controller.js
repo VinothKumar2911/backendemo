@@ -1,195 +1,453 @@
+
+
 const pool = require('../config/db');
-const { v4: uuidv4 } = require('uuid');
+const { generateCustomId } = require('../utils/idGenerator');
 
 /* =========================
-   CREATE DOCTOR PROFILE
+  GET DOCTOR PROFILE
+  (NO AUTO CREATE)
 ========================= */
-exports.createDoctorProfile = async (req, res) => {
-  try {
-    const { name, specialization, registrationId, gender, email, profileImageUrl } = req.body;
+exports.getDoctorProfile = async (req, res) => {
 
-    const [[exists]] = await pool.query(
-      `SELECT id FROM doctors WHERE user_auth_id = ?`,
-      [req.user.userId]
-    );
 
-    if (exists) {
-      return res.status(409).json({ message: 'Doctor profile already exists' });
-    }
+  const [[doctor]] = await pool.query(
+    `SELECT * FROM doctors WHERE user_auth_id = ?`,
+    [req.user.userId]
+  );
 
-    const doctorId = uuidv4();
-
-    await pool.query(
-      `
-      INSERT INTO doctors
-      (id, user_auth_id, name, phone, specialization, registration_id, gender, email, profile_image_url)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `,
-      [
-        doctorId,
-        req.user.userId,
-        name,
-        null,
-        specialization,
-        registrationId,
-        gender,
-        email,
-        profileImageUrl
-      ]
-    );
-
-    res.json({ message: 'Doctor profile created successfully', doctorId });
-  } catch (err) {
-    console.error('CREATE DOCTOR ERROR:', err);
-    res.status(500).json({ message: 'Failed to create doctor profile' });
+  if (!doctor) {
+    return res.status(404).json({
+      message: 'Doctor profile not found. Please register first.'
+    });
   }
+
+  res.json({ doctor });
 };
 
 /* =========================
-   CREATE PROGRAM
+  CREATE PROGRAM
 ========================= */
 exports.createProgram = async (req, res) => {
-  try {
-    const { name, description, totalMinutes } = req.body;
+  const { name, description, status = 'draft', tagIds = [] } = req.body;
 
+  if (!name || !description) {
+    return res.status(400).json({ message: 'Name and description required' });
+  }
+  const getDoctorId = async (userId) => {
     const [[doctor]] = await pool.query(
-      `SELECT id FROM doctors WHERE user_auth_id = ?`,
-      [req.user.userId]
+      `SELECT doctor_id FROM doctors WHERE user_auth_id = ?`,
+      [userId]
+    );
+    return doctor?.doctor_id || null;
+  };
+
+  const doctorId = await getDoctorId(req.user.userId);
+  if (!doctorId) {
+    return res.status(403).json({ message: 'Doctor profile not found' });
+  }
+
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+
+    const programId = await generateCustomId('PROGRAM');
+
+    await conn.query(
+      `INSERT INTO programs
+       (program_id, name, description, created_by_id, status)
+       VALUES (?, ?, ?, ?, ?)`,
+      [programId, name, description, doctorId, status]
     );
 
-    const programId = uuidv4();
+    if (tagIds.length) {
+      for (const tagId of tagIds) {
+        await conn.query(
+          `INSERT INTO program_tag_map (program_id, program_tag_id)
+           VALUES (?, ?)`,
+          [programId, tagId]
+        );
+      }
+    }
 
-    await pool.query(
-      `
-      INSERT INTO programs (id, doctor_id, name, description, total_minutes)
-      VALUES (?, ?, ?, ?, ?)
-      `,
-      [programId, doctor.id, name, description, totalMinutes]
-    );
+    await conn.commit();
 
     res.json({ message: 'Program created successfully', programId });
   } catch (err) {
-    console.error(err);
+    await conn.rollback();
+    console.error('CREATE PROGRAM ERROR:', err);
     res.status(500).json({ message: 'Failed to create program' });
+  } finally {
+    conn.release();
   }
 };
 
+
+
 /* =========================
-   CREATE EXERCISE
+  CREATE EXERCISE
 ========================= */
 exports.createExercise = async (req, res) => {
-  try {
-    const { title, video_s3_url, duration_minutes, category } = req.body;
+  const { title, description, video_s3_url, default_sets, default_reps, tagIds = [] } = req.body;
 
-    if (!title || !video_s3_url || !duration_minutes) {
-      return res.status(400).json({
-        message: 'title, video_s3_url, duration_minutes are required'
-      });
+  if (!title || !description) {
+    return res.status(400).json({ message: 'Title and description required' });
+  }
+  const getDoctorId = async (userId) => {
+    const [[doctor]] = await pool.query(
+      `SELECT doctor_id FROM doctors WHERE user_auth_id = ?`,
+      [userId]
+    );
+    return doctor?.doctor_id || null;
+  };
+
+  const doctorId = await getDoctorId(req.user.userId);
+  if (!doctorId) {
+    return res.status(403).json({ message: 'Doctor profile not found' });
+  }
+
+  const conn = await pool.getConnection();
+
+  if (!Array.isArray(tagIds) || tagIds.length === 0) {
+  await conn.rollback();
+  return res.status(400).json({ message: 'At least one tag is required' });
+}
+
+  try {
+    await conn.beginTransaction();
+
+    const exerciseId = await generateCustomId('EXERCISE');
+
+    await conn.query(
+      `INSERT INTO exercises
+       (exercise_id, title, description, video_s3_url,
+        default_sets, default_reps, created_by_id, status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'draft')`,
+      [
+        exerciseId,
+        title,
+        description,
+        video_s3_url || null,
+        default_sets || 0,
+        default_reps || 0,
+        doctorId
+      ]
+    );
+
+    for (const tagId of tagIds) {
+      await conn.query(
+        `INSERT INTO exercise_tag_map (exercise_id, program_tag_id)
+         VALUES (?, ?)`,
+        [exerciseId, tagId]
+      );
     }
 
-    const [[doctor]] = await pool.query(
-      `SELECT id FROM doctors WHERE user_auth_id = ?`,
-      [req.user.userId]
-    );
-
-    const exerciseId = uuidv4();
-
-    await pool.query(
-      `
-      INSERT INTO exercises
-      (id, doctor_id, title, video_s3_url, duration_minutes, category)
-      VALUES (?, ?, ?, ?, ?, ?)
-      `,
-      [exerciseId, doctor.id, title, video_s3_url, duration_minutes, category]
-    );
+    await conn.commit();
 
     res.json({ message: 'Exercise created successfully', exerciseId });
   } catch (err) {
-    console.error(err);
+    await conn.rollback();
+    console.error('CREATE EXERCISE ERROR:', err);
     res.status(500).json({ message: 'Failed to create exercise' });
+  } finally {
+    conn.release();
   }
 };
 
+
 /* =========================
-   ADD EXERCISE TO PROGRAM
+  ADD EXERCISE TO PROGRAM
+  (also used for admin default cloning)
 ========================= */
 exports.addExerciseToProgram = async (req, res) => {
-  const { programId, exerciseId, sets = 3, reps = 15 } = req.body;
+  const { programId, exerciseId, orderNo } = req.body;
+
+  if (!programId || !exerciseId) {
+    return res.status(400).json({ message: 'Invalid payload' });
+  }
 
   try {
+    const programExerciseId = await generateCustomId('PROGRAM_EXERCISE');
+
     await pool.query(
-      `
-      INSERT IGNORE INTO program_exercises
-      (id, program_id, exercise_id, sets, reps)
-      VALUES (?, ?, ?, ?, ?)
-      `,
-      [uuidv4(), programId, exerciseId, sets, reps]
+      `INSERT INTO program_exercises
+       (program_exercise_id, program_id, exercise_id, order_no)
+       VALUES (?, ?, ?, ?)`,
+      [programExerciseId, programId, exerciseId, orderNo || 1]
     );
 
     res.json({ message: 'Exercise added to program' });
   } catch (err) {
-    console.error(err);
+    console.error('ADD EXERCISE ERROR:', err);
     res.status(500).json({ message: 'Failed to add exercise' });
   }
 };
 
+
+
 /* =========================
-   ASSIGN PROGRAM TO PATIENT
+  CREATE PATIENT
+  (Doctor creates BOTH auth + profile)
 ========================= */
-exports.assignProgramToPatient = async (req, res) => {
-  const { patientId, programId } = req.body;
+exports.createPatient = async (req, res) => {
+ const body = req.body || {};
 
+const {
+  name,
+  phone,
+  dob,
+  gender,
+  age,
+} = body;
+if (!name || !phone || !dob || !gender) {
+  return res.status(400).json({
+    message: 'Missing required fields',
+  });
+}
+
+  const photoUrl = req.file ? `/uploads/patients/${req.file.filename}` : null;
+
+  if (!name || !phone || !dob || !gender) {
+    return res.status(400).json({ message: 'Missing required fields' });
+  }
+
+  const conn = await pool.getConnection();
   try {
-    const [[doctor]] = await pool.query(
-      `SELECT id FROM doctors WHERE user_auth_id = ?`,
-      [req.user.userId]
-    );
+    await conn.beginTransaction();
 
-    const [[already]] = await pool.query(
-      `
-      SELECT id FROM patient_programs
-      WHERE patient_id = ? AND assigned_by = ?
-      `,
-      [patientId, doctor.id]
-    );
+  const [[doctor]] = await conn.query(
+  `SELECT doctor_id FROM doctors WHERE user_auth_id = ?`,
+  [req.user.userId]
+);
 
-    await pool.query(
-      `
-      INSERT IGNORE INTO patient_programs
-      (id, patient_id, program_id, assigned_by, start_date)
-      VALUES (?, ?, ?, ?, CURDATE())
-      `,
-      [uuidv4(), patientId, programId, doctor.id]
-    );
 
-    // 🔥 CRITICAL FIX
-    await pool.query(
-      `UPDATE patients SET doctor_id = ? WHERE id = ?`,
-      [doctor.id, patientId]
-    );
 
-    if (!already) {
-      await pool.query(
-        `UPDATE doctors SET patients_treated = patients_treated + 1 WHERE id = ?`,
-        [doctor.id]
-      );
+    if (!doctor) {
+      await conn.rollback();
+      return res.status(403).json({ message: 'Doctor profile not found' });
     }
 
-    res.json({ message: 'Program assigned to patient successfully' });
+
+    const phoneStr = String(phone);
+
+    const [[existing]] = await conn.query(
+      `SELECT id FROM users_auth WHERE phone = ?`,
+      [phoneStr]
+    );
+
+    if (existing) {
+      await conn.rollback();
+      return res.status(409).json({ message: 'Patient already exists' });
+    }
+
+    const userAuthId = await generateCustomId('USER_AUTH');
+    const patientId = await generateCustomId('PATIENT');
+
+    await conn.query(
+      `INSERT INTO users_auth (id, phone, role, is_verified)
+   VALUES (?, ?, 'patient', 1)`,
+      [userAuthId, phoneStr]
+    );
+
+    await conn.query(
+      `INSERT INTO patients
+   (patient_id, user_auth_id, assigned_doctor_id,
+    name, phone, dob, gender, age, photo_url, status)
+   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'active')`,
+      [
+        patientId,
+        userAuthId,
+        doctor.doctor_id,
+        name,
+        phoneStr,
+        dob,
+        gender,
+        age || null,
+        photoUrl
+      ]
+    );
+
+
+    await conn.commit();
+    res.json({ message: 'Patient created successfully', patientId });
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ message: 'Assignment failed' });
+    await conn.rollback();
+    console.error('CREATE PATIENT ERROR:', err);
+    res.status(500).json({ message: 'Failed to create patient' });
+  } finally {
+    conn.release();
   }
 };
 
 
+
+
 /* =========================
-   DOCTOR DASHBOARD
+  ASSIGN PROGRAM TO PATIENT
+  (VERSION SNAPSHOT)
+========================= */
+exports.assignProgramToPatient = async (req, res) => {
+  const {
+    patient_id,
+    program_id,
+    sessions,
+    total_program_days,
+    start_date,
+    exercise_ids,
+    override
+  } = req.body;
+
+  if (!patient_id || !program_id || !total_program_days) {
+    return res.status(400).json({ message: 'Invalid payload' });
+  }
+
+  const conn = await pool.getConnection();
+
+  try {
+    await conn.beginTransaction();
+
+    const [[program]] = await conn.query(
+      `SELECT version FROM programs WHERE program_id = ?`,
+      [program_id]
+    );
+
+    if (!program) {
+      await conn.rollback();
+      return res.status(404).json({ message: 'Program not found' });
+    }
+
+    const [[doctor]] = await conn.query(
+      `SELECT doctor_id FROM doctors WHERE user_auth_id = ?`,
+      [req.user.userId]
+    );
+
+    if (!doctor) {
+      await conn.rollback();
+      return res.status(403).json({ message: 'Doctor not found' });
+    }
+
+    const [tags] = await conn.query(
+      `
+      SELECT pt.name
+      FROM program_tag_map ptm
+      JOIN program_tags pt ON pt.program_tag_id = ptm.program_tag_id
+      WHERE ptm.program_id = ?
+      `,
+      [program_id]
+    );
+
+    const tagNames = tags.map(t => t.name).join(',');
+
+    const startDate = start_date ? new Date(start_date) : new Date();
+    const endDate = new Date(startDate);
+    endDate.setDate(endDate.getDate() + total_program_days - 1);
+
+    const patientProgramId = await generateCustomId('PATIENT_PROGRAM');
+
+    // 1️⃣ patient_programs
+    await conn.query(
+      `
+      INSERT INTO patient_programs
+      (
+        patient_program_id,
+        patient_id,
+        program_id,
+        version,
+        tags,
+        assigned_by_doctor_id,
+        start_date,
+        end_date,
+        sessions_per_day,
+        sessions,
+        total_program_days,
+        status
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active')
+      `,
+      [
+        patientProgramId,
+        patient_id,
+        program_id,
+        program.version,
+        tagNames,
+        doctor.doctor_id,
+        startDate,
+        endDate,
+        sessions?.length || 1,
+        JSON.stringify(sessions || []),
+        total_program_days
+      ]
+    );
+
+    // 2️⃣ overridden exercises
+    if (override === true && Array.isArray(exercise_ids)) {
+      let order = 1;
+      for (const exId of exercise_ids) {
+        await conn.query(
+          `
+          INSERT INTO patient_program_exercises
+          (patient_program_exercise_id, patient_program_id, exercise_id, order_no)
+          VALUES (?, ?, ?, ?)
+          `,
+          [
+            await generateCustomId('PATIENT_PROGRAM_EX'),
+            patientProgramId,
+            exId,
+            order++
+          ]
+        );
+      }
+    }
+
+    // 3️⃣ audit log (INSIDE TX)
+    await conn.query(
+      `
+      INSERT INTO doctor_audit_logs
+      (audit_id, doctor_id, patient_id, action, entity_type, entity_id, metadata)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+      `,
+      [
+        await generateCustomId('AUDIT'),
+        doctor.doctor_id,
+        patient_id,
+        override ? 'ASSIGN_PROGRAM_WITH_OVERRIDE' : 'ASSIGN_PROGRAM',
+        'program',
+        program_id,
+        JSON.stringify({
+          overridden: override === true,
+          exercises: exercise_ids || [],
+          sessions,
+          total_program_days,
+          start_date
+        })
+      ]
+    );
+
+    await conn.commit();
+
+    return res.json({
+      message: 'Program assigned successfully',
+      patient_program_id: patientProgramId
+    });
+
+  } catch (err) {
+    await conn.rollback();
+    console.error('ASSIGN PROGRAM ERROR:', err);
+    return res.status(500).json({ message: 'Failed to assign program' });
+  } finally {
+    conn.release();
+  }
+};
+
+
+
+/* =========================
+  DOCTOR DASHBOARD (CURRENT DB)
 ========================= */
 exports.getDoctorDashboard = async (req, res) => {
   try {
+    // 1️⃣ Get doctor_id
     const [[doctor]] = await pool.query(
-      `SELECT id FROM doctors WHERE user_auth_id = ?`,
+      `SELECT doctor_id FROM doctors WHERE user_auth_id = ?`,
       [req.user.userId]
     );
 
@@ -199,459 +457,860 @@ exports.getDoctorDashboard = async (req, res) => {
 
     const [patients] = await pool.query(
       `
-  SELECT
-    p.id AS patient_id,
-    COALESCE(p.name, 'Unknown Patient') AS patient_name,
-     p.photo_url AS photo_url,
-    p.active AS active,
-    p.gender AS gender,
-p.age AS age,
+      SELECT
+        p.patient_id,
+        p.name AS patient_name,
+        p.gender,
+        p.age,
+        p.photo_url,
+        p.status AS active,
 
-    MAX(pr.id) AS program_id,
-    MAX(pr.name) AS program_name,
+        pp.patient_program_id,
+        pp.program_id,
+        pr.name AS program_name,
 
-    COUNT(DISTINCT e.id) AS total_exercises,
-    COUNT(DISTINCT CASE WHEN ep.completed = true THEN e.id END) AS completed_exercises
+        -- total exercises in program
+        COUNT(DISTINCT pe.exercise_id) AS total_exercises,
 
+        -- completed exercises by patient
+        COUNT(DISTINCT pex.exercise_id) AS completed_exercises
 
-  FROM patients p
-  LEFT JOIN patient_programs pp ON pp.patient_id = p.id
-  LEFT JOIN programs pr ON pr.id = pp.program_id
-  LEFT JOIN program_exercises pe ON pe.program_id = pr.id
-  LEFT JOIN exercises e ON e.id = pe.exercise_id
-  LEFT JOIN exercise_progress ep
-    ON ep.exercise_id = e.id AND ep.patient_id = p.id
+      FROM patients p
 
-  WHERE p.doctor_id = ?
+      LEFT JOIN patient_programs pp
+        ON pp.patient_id = p.patient_id
+        AND pp.status = 'active'
 
-  GROUP BY p.id
-  `,
-      [doctor.id]
+      LEFT JOIN programs pr
+        ON pr.program_id = pp.program_id
+
+      LEFT JOIN program_exercises pe
+        ON pe.program_id = pp.program_id
+
+      LEFT JOIN patient_exercises pex
+        ON pex.patient_id = p.patient_id
+        AND pex.program_id = pp.program_id
+        AND pex.completed = 1
+
+      WHERE p.assigned_doctor_id = ?
+
+      GROUP BY p.patient_id
+      ORDER BY p.created_at DESC
+      `,
+      [doctor.doctor_id]
     );
-
 
     res.json({ patients });
   } catch (err) {
-    console.error("Dashboard error:", err);
-    res.status(500).json({ message: "Failed to fetch dashboard" });
+    console.error('DOCTOR DASHBOARD ERROR:', err);
+    res.status(500).json({ message: 'Failed to fetch dashboard' });
   }
 };
 
-exports.updateDoctorProfile = async (req, res) => {
+
+exports.getExercises = async (req, res) => {
+  const [[doctor]] = await pool.query(
+    `SELECT doctor_id FROM doctors WHERE user_auth_id = ?`,
+    [req.user.userId]
+  );
+
+  const [rows] = await pool.query(
+    `
+    SELECT
+      e.exercise_id,
+      e.title,
+      e.description,
+      e.video_s3_url,
+      e.default_sets,
+      e.default_reps,
+      e.status,
+      e.created_by_id,
+
+      -- 🔥 TAGS
+      GROUP_CONCAT(pt.name) AS tags,
+
+      -- 🔥 DURATION (same logic you used in detail API)
+      e.duration_minutes
+
+    FROM exercises e
+    LEFT JOIN exercise_tag_map etm
+      ON etm.exercise_id = e.exercise_id
+    LEFT JOIN program_tags pt
+      ON pt.program_tag_id = etm.program_tag_id
+
+    WHERE
+  e.created_by_id IS NULL
+  OR e.created_by_id = ?
+
+
+    GROUP BY e.exercise_id
+    ORDER BY e.created_at DESC
+    `,
+    [doctor.doctor_id]
+  );
+
+  res.json({ exercises: rows });
+};
+
+exports.getProgramTags = async (req, res) => {
+  const [tags] = await pool.query(
+    `SELECT program_tag_id, name FROM program_tags ORDER BY name`
+  );
+
+  res.json({ tags });
+};
+
+
+exports.getExerciseById = async (req, res) => {
+  const { id } = req.params;
+
+  const [[exercise]] = await pool.query(
+    `
+    SELECT
+      e.exercise_id,
+      e.title,
+      e.description,
+      e.video_s3_url,
+      e.default_sets,
+      e.default_reps,
+      e.status,
+      e.created_at,
+
+      d.name AS uploaded_by,
+
+      GROUP_CONCAT(pt.name) AS tags
+    FROM exercises e
+    LEFT JOIN doctors d ON d.doctor_id = e.created_by_id
+    LEFT JOIN exercise_tag_map etm ON etm.exercise_id = e.exercise_id
+    LEFT JOIN program_tags pt ON pt.program_tag_id = etm.program_tag_id
+    WHERE e.exercise_id = ?
+    GROUP BY e.exercise_id
+    `,
+    [id]
+  );
+
+  if (!exercise) {
+    return res.status(404).json({ message: 'Exercise not found' });
+  }
+
+res.json({
+  exercise: {
+    ...exercise,
+    duration_minutes: exercise.duration_minutes ?? 0,
+    category: 'Physio',
+    uploaded_on: exercise.created_at,
+  },
+});
+
+};
+
+exports.updateExerciseStatus = async (req, res) => {
+  const { id } = req.params;
+  const { status } = req.body;
+
+  if (!status) {
+    return res.status(400).json({ message: 'Status is required' });
+  }
+
+  await pool.query(
+    `
+    UPDATE exercises
+    SET status = ?
+    WHERE exercise_id = ?
+    `,
+    [status, id]
+  );
+
+  res.json({ message: 'Exercise status updated', status });
+};
+
+exports.getPrograms = async (req, res) => {
+  const patientId = req.query.patient_id || null;
+
+  const [[doctor]] = await pool.query(
+    `SELECT doctor_id FROM doctors WHERE user_auth_id = ?`,
+    [req.user.userId]
+  );
+
+  const [programs] = await pool.query(
+`
+SELECT
+  p.program_id,
+  p.name,
+  p.description,
+  p.status,
+  p.created_by_id,
+
+  -- 🔹 TAG NAMES
+  GROUP_CONCAT(DISTINCT pt.name) AS tags,
+
+  -- 🔹 TAG IDS
+  GROUP_CONCAT(DISTINCT pt.program_tag_id) AS tag_ids,
+
+  -- 🔹 TOTAL EXERCISES
+  COUNT(DISTINCT pe.exercise_id) AS total_exercises,
+
+  -- 🔥 VERY IMPORTANT
+  CASE
+    WHEN ppa.patient_program_id IS NOT NULL THEN 1
+    ELSE 0
+  END AS is_assigned
+
+FROM programs p
+
+LEFT JOIN program_tag_map ptm ON ptm.program_id = p.program_id
+LEFT JOIN program_tags pt ON pt.program_tag_id = ptm.program_tag_id
+LEFT JOIN program_exercises pe ON pe.program_id = p.program_id
+
+-- 🔥 JOIN patient_programs ONLY FOR THIS PATIENT
+LEFT JOIN patient_programs ppa
+  ON ppa.program_id = p.program_id
+ AND ppa.patient_id = ?
+ AND ppa.status = 'active'
+
+WHERE p.created_by_id IS NULL
+   OR p.created_by_id = ?
+
+GROUP BY p.program_id
+ORDER BY p.created_at DESC
+
+
+`,
+[patientId, doctor.doctor_id]
+);
+
+
+  res.json({ programs });
+};
+
+exports.getProgramExercises = async (req, res) => {
+  const { programId } = req.params;
+
+  const [rows] = await pool.query(
+    `
+    SELECT
+      e.exercise_id,
+      e.title,
+      e.description,
+      e.status,
+      GROUP_CONCAT(pt.name) AS tags,
+      (e.default_sets * e.default_reps) AS duration_minutes
+    FROM program_exercises pe
+    JOIN exercises e ON e.exercise_id = pe.exercise_id
+    LEFT JOIN exercise_tag_map etm ON etm.exercise_id = e.exercise_id
+    LEFT JOIN program_tags pt ON pt.program_tag_id = etm.program_tag_id
+    WHERE pe.program_id = ?
+    GROUP BY e.exercise_id
+    ORDER BY pe.order_no
+    `,
+    [programId]
+  );
+
+  res.json({ exercises: rows });
+};
+
+exports.updateProgramStatus = async (req, res) => {
+  const { id } = req.params;
+  const { status } = req.body;
+
+  if (!status) {
+    return res.status(400).json({ message: 'Status required' });
+  }
+
+  await pool.query(
+    `
+    UPDATE programs
+    SET status = ?
+    WHERE program_id = ?
+    `,
+    [status, id]
+  );
+
+  res.json({ message: 'Program status updated', status });
+};
+
+exports.removeExerciseFromProgram = async (req, res) => {
+  const { programId, exerciseId } = req.params;
+
+  await pool.query(
+    `DELETE FROM program_exercises
+     WHERE program_id = ? AND exercise_id = ?`,
+    [programId, exerciseId]
+  );
+
+  await pool.query(
+    `UPDATE programs
+     SET version = version + 1
+     WHERE program_id = ?`,
+    [programId]
+  );
+
+  res.json({ message: 'Video removed' });
+};
+
+/* =========================
+  BUMP PROGRAM VERSION
+========================= */
+exports.bumpProgramVersion = async (req, res) => {
+  const { id } = req.params;
+
   try {
-    const { name, specialization, gender, email, profile_image_url } = req.body;
-
-    // 1️⃣ Find doctor using JWT userId
-    const [[doctor]] = await pool.query(
-      `SELECT id FROM doctors WHERE user_auth_id = ?`,
-      [req.user.userId]
-    );
-
-    if (!doctor) {
-      return res.status(404).json({ message: 'Doctor profile not found' });
-    }
-
-    // 2️⃣ Update doctor profile
     await pool.query(
       `
-      UPDATE doctors
-      SET
-        name = COALESCE(?, name),
-        specialization = COALESCE(?, specialization),
-        gender = COALESCE(?, gender),
-        email = COALESCE(?, email),
-        profile_image_url = COALESCE(?, profile_image_url)
-      WHERE id = ?
+      UPDATE programs
+      SET version = version + 1
+      WHERE program_id = ?
+      `,
+      [id]
+    );
+
+    res.json({ message: 'Program version updated' });
+  } catch (err) {
+    console.error('BUMP VERSION ERROR:', err);
+    res.status(500).json({ message: 'Failed to update version' });
+  }
+};
+
+
+exports.cloneProgram = async (req, res) => {
+  const { programId, newName } = req.body;
+
+  if (!programId || !newName) {
+    return res.status(400).json({
+      message: 'programId and newName are required',
+    });
+  }
+
+  const conn = await pool.getConnection();
+
+  try {
+    await conn.beginTransaction();
+
+    /* 1️⃣ Fetch original program */
+    const [[program]] = await conn.query(
+      `SELECT * FROM programs WHERE program_id = ?`,
+      [programId]
+    );
+
+    if (!program) {
+      await conn.rollback();
+      return res.status(404).json({ message: 'Program not found' });
+    }
+
+    /* 2️⃣ Check name uniqueness */
+    const [[exists]] = await conn.query(
+      `SELECT 1 FROM programs WHERE name = ? LIMIT 1`,
+      [newName]
+    );
+
+    if (exists) {
+      await conn.rollback();
+      return res.status(409).json({
+        message: 'Program name already exists',
+      });
+    }
+
+    /* 3️⃣ Create new program */
+    const newProgramId = await generateCustomId('PROGRAM');
+
+    await conn.query(
+      `
+      INSERT INTO programs
+      (program_id, name, description, created_by_id, status, version)
+      VALUES (?, ?, ?, ?, 'draft', 1)
       `,
       [
-        name,
-        specialization,
-        gender,
-        email,
-        profile_image_url,
-        doctor.id,
+        newProgramId,
+        newName,
+        program.description,
+        program.created_by_id,
       ]
     );
 
-    res.json({ message: 'Doctor profile updated successfully' });
+    /* 4️⃣ COPY TAGS (🔥 THIS WAS MISSING BEFORE) */
+    await conn.query(
+      `
+      INSERT INTO program_tag_map (program_id, program_tag_id)
+      SELECT ?, program_tag_id
+      FROM program_tag_map
+      WHERE program_id = ?
+      `,
+      [newProgramId, programId]
+    );
+
+    /* 5️⃣ COPY EXERCISES WITH NEW IDS */
+    const [exercises] = await conn.query(
+      `
+      SELECT exercise_id, order_no
+      FROM program_exercises
+      WHERE program_id = ?
+      ORDER BY order_no
+      `,
+      [programId]
+    );
+
+    for (const ex of exercises) {
+      await conn.query(
+        `
+        INSERT INTO program_exercises
+        (program_exercise_id, program_id, exercise_id, order_no)
+        VALUES (?, ?, ?, ?)
+        `,
+        [
+          await generateCustomId('PROGRAM_EXERCISE'),
+          newProgramId,
+          ex.exercise_id,
+          ex.order_no,
+        ]
+      );
+    }
+
+    await conn.commit();
+
+    return res.json({ programId: newProgramId });
   } catch (err) {
-    console.error('UPDATE DOCTOR ERROR:', err);
-    res.status(500).json({ message: 'Failed to update doctor profile' });
+    await conn.rollback();
+    console.error('CLONE PROGRAM ERROR:', err);
+
+    return res.status(500).json({
+      message: err.message || 'Clone failed',
+    });
+  } finally {
+    conn.release();
   }
 };
 
-/* =========================
-   GET DOCTOR PROFILE
-========================= */
-exports.getDoctorProfile = async (req, res) => {
+
+
+exports.createProgramWithExercises = async (req, res) => {
+  const { name, description, tagIds, exerciseIds } = req.body;
+
+  if (!name || !exerciseIds?.length) {
+    return res.status(400).json({ message: 'Invalid payload' });
+  }
+
+  const [[doctor]] = await pool.query(
+    `SELECT doctor_id FROM doctors WHERE user_auth_id = ?`,
+    [req.user.userId]
+  );
+
+  // 1️⃣ UNIQUE NAME CHECK
+  const [[exists]] = await pool.query(
+    `SELECT 1 FROM programs WHERE name = ? LIMIT 1`,
+    [name]
+  );
+
+  if (exists) {
+    return res.status(409).json({ message: 'Program name already exists' });
+  }
+
+  const conn = await pool.getConnection();
   try {
-    const [[doctor]] = await pool.query(
+    await conn.beginTransaction();
+
+    const programId = await generateCustomId('PROGRAM');
+
+    // 2️⃣ CREATE PROGRAM
+    await conn.query(
+      `
+      INSERT INTO programs
+      (program_id, name, description, created_by_id, status, version)
+      VALUES (?, ?, ?, ?, 'draft', 1)
+      `,
+      [programId, name, description, doctor.doctor_id]
+    );
+
+    // 3️⃣ TAGS
+    for (const tagId of tagIds) {
+      await conn.query(
+        `INSERT INTO program_tag_map (program_id, program_tag_id)
+         VALUES (?, ?)`,
+        [programId, tagId]
+      );
+    }
+
+    // 4️⃣ EXERCISES
+    let order = 1;
+    for (const exId of exerciseIds) {
+      await conn.query(
+        `INSERT INTO program_exercises
+         (program_exercise_id, program_id, exercise_id, order_no)
+         VALUES (?, ?, ?, ?)`,
+        [await generateCustomId('PROGRAM_EXERCISE'), programId, exId, order++]
+      );
+    }
+
+    await conn.commit();
+    res.json({ programId });
+  } catch (e) {
+    await conn.rollback();
+    res.status(500).json({ message: 'Create failed' });
+  } finally {
+    conn.release();
+  }
+};
+
+exports.getProgramById = async (req, res) => {
+  try {
+    const { id } = req.params; // program_id
+    const patientId = req.query.patient_id || null;
+
+    const [[program]] = await pool.query(
       `
       SELECT
-        id,
-        name,
-        specialization,
-        registration_id,
-        gender,
-        email,
-        profile_image_url,
-        patients_treated,
-        created_at
-      FROM doctors
-      WHERE user_auth_id = ?
+        p.program_id,
+        p.name,
+        p.description,
+        p.version,
+        p.created_by_id,
+        p.status,
+        GROUP_CONCAT(DISTINCT pt.name) AS tags,
+
+        CASE
+          WHEN pp.patient_program_id IS NOT NULL THEN 1
+          ELSE 0
+        END AS is_assigned
+
+      FROM programs p
+
+      LEFT JOIN program_tag_map ptm
+        ON ptm.program_id = p.program_id
+      LEFT JOIN program_tags pt
+        ON pt.program_tag_id = ptm.program_tag_id
+
+      LEFT JOIN patient_programs pp
+        ON pp.program_id = p.program_id
+       AND pp.patient_id = ?
+       AND pp.status = 'active'
+
+      WHERE p.program_id = ?
+
+      GROUP BY p.program_id
       `,
-      [req.user.userId]
+      [patientId, id]
     );
 
-    if (!doctor) {
-      return res.status(404).json({
-        message: 'Doctor profile not found'
-      });
+    if (!program) {
+      return res.status(404).json({ message: 'Program not found' });
     }
 
-    res.json(doctor);
+    res.json({ program });
   } catch (err) {
-    console.error('GET DOCTOR PROFILE ERROR:', err);
-    res.status(500).json({
-      message: 'Failed to fetch doctor profile'
-    });
+    console.error('GET PROGRAM BY ID ERROR:', err);
+    res.status(500).json({ message: 'Failed to load program' });
   }
 };
 
-/* =========================
-   CREATE PATIENT
-========================= */
-exports.createPatient = async (req, res) => {
-  try {
 
-
-    const { name, age, phone, email, gender } = req.body;
-
-    if (!name || !age || !phone || !email || !gender) {
-      return res.status(400).json({ message: 'All fields required' });
-    }
-
-    const [[doctor]] = await pool.query(
-      `SELECT id FROM doctors WHERE user_auth_id = ?`,
-      [req.user.userId]
-    );
-
-    const patientId = uuidv4();
-    const photoUrl = req.file
-      ? `/uploads/patients/${req.file.filename}`
-      : null;
-
-    const [[authUser]] = await pool.query(
-      `SELECT id FROM users_auth WHERE phone = ? AND role = 'patient'`,
-      [phone]
-    );
-
-    if (!authUser) {
-      return res.status(400).json({
-        message: 'Patient must register with OTP first'
-      });
-    }
-
-
-    await pool.query(
-      `
-      INSERT INTO patients
-(id, doctor_id, user_auth_id, name, age, phone, email, gender, photo_url, active)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, true)
-
-      `,
-      [patientId, doctor.id, name, age, phone, email, gender, photoUrl]
-    );
-
-    res.json({ message: 'Patient created', patientId });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ message: 'Failed to create patient' });
-  }
-};
-/* =========================
-   TOGGLE PATIENT STATUS
-========================= */
-exports.updatePatientStatus = async (req, res) => {
-  const { active } = req.body;
-  const patientId = req.params.id;
-
-  try {
-    await pool.query(
-      `UPDATE patients SET active = ? WHERE id = ?`,
-      [active, patientId]
-    );
-
-    res.json({ message: 'Patient status updated' });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ message: 'Failed to update status' });
-  }
-};
-
-/* =========================
-   GET PATIENT PROFILE
-========================= */
-exports.getPatientProfile = async (req, res) => {
-  const patientId = req.params.id;
+exports.getPatientById = async (req, res) => {
+  const { id } = req.params;
 
   try {
     const [[patient]] = await pool.query(
       `
-      SELECT id, name, age, phone, email, photo_url, active, created_at
-      FROM patients
-      WHERE id = ?
+      SELECT
+        p.patient_id AS id,
+        p.name,
+        p.phone,
+        p.gender,
+        p.age,
+        p.dob,
+        p.photo_url,
+        IF(p.status = 'active', 1, 0) AS active,
+        p.created_at
+      FROM patients p
+      WHERE p.patient_id = ?
       `,
-      [patientId]
+      [id]
     );
 
     if (!patient) {
       return res.status(404).json({ message: 'Patient not found' });
     }
 
-    res.json({
-      patient: patient, // 🔴 REQUIRED KEY
-    });
+    res.json({ patient });
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ message: 'Failed to fetch patient profile' });
+    console.error('GET PATIENT ERROR:', err);
+    res.status(500).json({ message: 'Failed to fetch patient' });
   }
 };
 
 
-exports.getExerciseById = async (req, res) => {
+
+exports.updatePatientStatus = async (req, res) => {
+  const { id } = req.params;
+  const { active } = req.body; // 1 or 0
+
+  if (active !== 0 && active !== 1) {
+    return res.status(400).json({ message: 'Invalid status value' });
+  }
+
   try {
-    const [[exercise]] = await pool.query(
+    await pool.query(
       `
-      SELECT 
-        e.id,
-        COALESCE(e.title, '') AS title,
-        COALESCE(e.description, '') AS description,
-        COALESCE(e.duration_minutes, 0) AS duration_minutes,
-        COALESCE(e.category, '') AS category,
-        COALESCE(e.tags, '') AS tags,
-        COALESCE(e.status, 'draft') AS status,
-        COALESCE(e.video_s3_url, '') AS video_url,
-        COALESCE(d.name, 'Unknown') AS uploaded_by,
-        e.created_at
-      FROM exercises e
-      LEFT JOIN doctors d ON d.id = e.doctor_id
-      WHERE e.id = ?
+      UPDATE patients
+      SET status = ?
+      WHERE patient_id = ?
       `,
-      [req.params.id]
+      [active ? 'active' : 'inactive', id]
     );
 
-    if (!exercise) {
-      return res.status(404).json({ message: 'Exercise not found' });
-    }
-
-    res.json({ exercise });
+    res.json({ message: 'Patient status updated', active });
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ message: 'Failed to fetch exercise' });
+    console.error('UPDATE PATIENT STATUS ERROR:', err);
+    res.status(500).json({ message: 'Failed to update status' });
   }
 };
 
+exports.updateDoctorProfile = async (req, res) => {
+  const { name, phone, email, experience } = req.body;
+  const photoUrl = req.file ? `/uploads/doctors/${req.file.filename}` : null;
+
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+
+    const [[doctor]] = await conn.query(
+      `SELECT doctor_id, phone, user_auth_id FROM doctors WHERE user_auth_id = ?`,
+      [req.user.userId]
+    );
+
+    if (!doctor) {
+      await conn.rollback();
+      return res.status(404).json({ message: 'Doctor not found' });
+    }
+
+    // 🔹 Update doctors table
+    await conn.query(
+      `
+      UPDATE doctors
+      SET
+        name = ?,
+        phone = ?,
+        email = ?,
+        experience = ?,
+        photo_url = COALESCE(?, photo_url)
+      WHERE doctor_id = ?
+      `,
+      [name, phone, email, experience, photoUrl, doctor.doctor_id]
+    );
+
+    // 🔹 If phone changed → update users_auth also
+    if (phone && phone !== doctor.phone) {
+      await conn.query(
+        `UPDATE users_auth SET phone = ? WHERE id = ?`,
+        [phone, doctor.user_auth_id]
+      );
+    }
+
+    await conn.commit();
+    res.json({ message: 'Profile updated successfully' });
+  } catch (err) {
+    await conn.rollback();
+    console.error('UPDATE DOCTOR PROFILE ERROR:', err);
+    res.status(500).json({ message: 'Failed to update profile' });
+  } finally {
+    conn.release();
+  }
+};
 
 
 /* =========================
-   PATIENT MEDICAL HISTORY
+  CLONE PROGRAM WITH SELECTED EXERCISES
 ========================= */
-exports.getPatientMedicalHistory = async (req, res) => {
-  const patientId = req.params.id;
+exports.cloneProgramWithExercises = async (req, res) => {
+  const { program_id, exercise_ids, new_name } = req.body;
+
+  if (!program_id || !exercise_ids?.length || !new_name) {
+    return res.status(400).json({ message: 'Invalid payload' });
+  }
+
+  const conn = await pool.getConnection();
+
+  try {
+    await conn.beginTransaction();
+
+    // 1️⃣ Fetch original program
+    const [[program]] = await conn.query(
+      `SELECT * FROM programs WHERE program_id = ?`,
+      [program_id]
+    );
+
+    if (!program) {
+      await conn.rollback();
+      return res.status(404).json({ message: 'Program not found' });
+    }
+
+    // 2️⃣ Create new program
+    const newProgramId = await generateCustomId('PROGRAM');
+
+    await conn.query(
+      `
+      INSERT INTO programs
+      (program_id, name, description, created_by_id, status, version)
+      VALUES (?, ?, ?, ?, 'draft', 1)
+      `,
+      [
+        newProgramId,
+        new_name,
+        program.description,
+        program.created_by_id,
+      ]
+    );
+
+    // 3️⃣ Copy tags
+    await conn.query(
+      `
+      INSERT INTO program_tag_map (program_id, program_tag_id)
+      SELECT ?, program_tag_id
+      FROM program_tag_map
+      WHERE program_id = ?
+      `,
+      [newProgramId, program_id]
+    );
+
+    // 4️⃣ Add selected exercises only
+    let order = 1;
+    for (const exId of exercise_ids) {
+      await conn.query(
+        `
+        INSERT INTO program_exercises
+        (program_exercise_id, program_id, exercise_id, order_no)
+        VALUES (?, ?, ?, ?)
+        `,
+        [
+          await generateCustomId('PROGRAM_EXERCISE'),
+          newProgramId,
+          exId,
+          order++,
+        ]
+      );
+    }
+
+    await conn.commit();
+
+    res.json({
+      message: 'Program cloned successfully',
+      program_id: newProgramId,
+    });
+
+  } catch (err) {
+    await conn.rollback();
+    console.error('CLONE PROGRAM WITH EXERCISES ERROR:', err);
+    res.status(500).json({ message: 'Clone failed' });
+  } finally {
+    conn.release();
+  }
+};
+
+exports.getPatientProgramExercises = async (req, res) => {
+  const { patientProgramId } = req.params;
+
+  // 1️⃣ Check overridden exercises
+  const [overrides] = await pool.query(
+    `
+    SELECT e.*
+    FROM patient_program_exercises ppe
+    JOIN exercises e ON e.exercise_id = ppe.exercise_id
+    WHERE ppe.patient_program_id = ?
+    ORDER BY ppe.order_no
+    `,
+    [patientProgramId]
+  );
+
+  // 2️⃣ If overridden exists → return snapshot
+  if (overrides.length) {
+    return res.json({ exercises: overrides, source: "override" });
+  }
+
+  // 3️⃣ Else → fallback to program exercises
+  const [defaultExercises] = await pool.query(
+    `
+    SELECT e.*
+    FROM program_exercises pe
+    JOIN exercises e ON e.exercise_id = pe.exercise_id
+    WHERE pe.program_id = (
+      SELECT program_id FROM patient_programs WHERE patient_program_id = ?
+    )
+    ORDER BY pe.order_no
+    `,
+    [patientProgramId]
+  );
+
+  res.json({ exercises: defaultExercises, source: "program" });
+};
+/* =========================
+  GET PATIENT PROGRAM HISTORY
+========================= */
+
+function parseSessions(value) {
+  if (!value) return [];
+
+  // Already array
+  if (Array.isArray(value)) return value;
+
+  // If JSON string
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+
+    // JSON array string
+    if (trimmed.startsWith('[')) {
+      try {
+        return JSON.parse(trimmed);
+      } catch {
+        return [];
+      }
+    }
+
+    // Comma-separated string (old data)
+    return trimmed.split(',').map(s => s.trim());
+  }
+
+  return [];
+}
+
+
+/* =========================
+  GET PATIENT PROGRAM HISTORY
+========================= */
+exports.getPatientProgramHistory = async (req, res) => {
+  const { patientId } = req.params;
 
   try {
     const [rows] = await pool.query(
       `
-      SELECT condition_name, notes, created_at
-      FROM patient_medical_history
-      WHERE patient_id = ?
-      ORDER BY created_at DESC
+      SELECT
+        pp.patient_program_id,
+        pp.program_id,
+        p.name AS program_name,
+
+        pp.start_date,
+        pp.end_date,
+        pp.total_program_days,
+        pp.sessions_per_day,
+        pp.sessions,
+        pp.status,
+
+        pp.created_at AS assigned_at
+
+      FROM patient_programs pp
+      JOIN programs p ON p.program_id = pp.program_id
+
+      WHERE pp.patient_id = ?
+      ORDER BY pp.created_at DESC
       `,
       [patientId]
     );
 
-    res.json({ history: rows });
+    res.json({
+      programs: rows.map(p => ({
+        ...p,
+        sessions: parseSessions(p.sessions),
+      })),
+    });
+
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ message: 'Failed to fetch history' });
-  }
-};
-/* =========================
-   GET DOCTOR PROGRAMS
-========================= */
-exports.getDoctorPrograms = async (req, res) => {
-  try {
-    const [[doctor]] = await pool.query(
-      `SELECT id FROM doctors WHERE user_auth_id = ?`,
-      [req.user.userId]
-    );
-
-    const [rows] = await pool.query(
-      `
-      SELECT
-        p.id,
-        p.name,
-        p.description,
-        p.total_minutes,
-        p.status,
-        COUNT(pe.exercise_id) AS exercise_count
-      FROM programs p
-      LEFT JOIN program_exercises pe ON pe.program_id = p.id
-      WHERE p.doctor_id = ?
-      GROUP BY p.id
-      `,
-      [doctor.id]
-    );
-
-    res.json({ programs: rows });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ message: 'Failed to fetch programs' });
-  }
-};
-/* =========================
-   UPDATE PROGRAM STATUS
-========================= */
-exports.updateProgramStatus = async (req, res) => {
-  const { status } = req.body;
-
-  try {
-    await pool.query(
-      `UPDATE programs SET status = ? WHERE id = ?`,
-      [status, req.params.id]
-    );
-
-    res.json({ message: 'Program status updated' });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ message: 'Failed to update program status' });
-  }
-};
-
-/* =========================
-   GET DOCTOR EXERCISES
-========================= */
-exports.getDoctorExercises = async (req, res) => {
-  try {
-    const [[doctor]] = await pool.query(
-      `SELECT id FROM doctors WHERE user_auth_id = ?`,
-      [req.user.userId]
-    );
-
-    const [rows] = await pool.query(
-      `
-      SELECT id, title, duration_minutes, category, status
-      FROM exercises
-      WHERE doctor_id = ?
-      `,
-      [doctor.id]
-    );
-
-    res.json({ exercises: rows });
-  } catch (err) {
-    res.status(500).json({ message: 'Failed to fetch exercises' });
-  }
-};
-
-/* =========================
-   UPDATE EXERCISE STATUS
-========================= */
-exports.updateExerciseStatus = async (req, res) => {
-  const { status } = req.body;
-
-  await pool.query(
-    `UPDATE exercises SET status = ? WHERE id = ?`,
-    [status, req.params.id]
-  );
-
-  res.json({ message: 'Exercise status updated' });
-};
-
-exports.getProgramExercises = async (req, res) => {
-  const [rows] = await pool.query(
-    `
-    SELECT e.*
-    FROM exercises e
-    JOIN program_exercises pe ON pe.exercise_id = e.id
-    WHERE pe.program_id = ?
-    `,
-    [req.params.id]
-  );
-
-  res.json({ exercises: rows });
-};
-
-
-exports.assignExercisesToPatient = async (req, res) => {
-  try {
-    const { patientId, exerciseIds, assignedDate, dueDate } = req.body;
-
-    if (!patientId || !exerciseIds?.length || !assignedDate || !dueDate) {
-      return res.status(400).json({ message: 'Invalid payload' });
-    }
-
-    const [[doctor]] = await pool.query(
-      `SELECT id FROM doctors WHERE user_auth_id = ?`,
-      [req.user.userId]
-    );
-
-    for (const exerciseId of exerciseIds) {
-      // 1️⃣ assignment table
-      await pool.query(
-        `
-        INSERT IGNORE INTO patient_exercises
-        (id, patient_id, exercise_id, assigned_by, assigned_date, due_date)
-        VALUES (?, ?, ?, ?, ?, ?)
-        `,
-        [
-          uuidv4(),
-          patientId,
-          exerciseId,
-          doctor.id,
-          assignedDate,
-          dueDate,
-        ]
-      );
-
-      // 2️⃣ progress table (🔥 THIS FIXES UI)
-      await pool.query(
-        `
-        INSERT IGNORE INTO exercise_progress
-        (id, patient_id, exercise_id, completed)
-        VALUES (?, ?, ?, false)
-        `,
-        [
-          uuidv4(),
-          patientId,
-          exerciseId,
-        ]
-      );
-    }
-
-    res.json({ message: 'Exercises assigned successfully' });
-  } catch (err) {
-    console.error('Assign exercises error:', err);
-    res.status(500).json({ message: 'Failed to assign exercises' });
-  }
-};
-exports.updateExercise = async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { title, description } = req.body;
-
-    await pool.query(
-      `
-      UPDATE exercises
-      SET title = ?, description = ?
-      WHERE id = ?
-      `,
-      [title, description, id]
-    );
-
-    res.json({ message: 'Exercise updated successfully' });
-  } catch (err) {
-    console.error('UPDATE EXERCISE ERROR:', err);
-    res.status(500).json({ message: 'Server error' });
+    console.error('PROGRAM HISTORY ERROR:', err);
+    res.status(500).json({ message: 'Failed to fetch program history' });
   }
 };

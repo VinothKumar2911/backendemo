@@ -1,71 +1,120 @@
+
 const pool = require('../config/db');
-const { v4: uuidv4 } = require('uuid');
 const jwt = require('jsonwebtoken');
+const { generateCustomId } = require('../utils/idGenerator');
+
+
+/**
+ * Normalize phone number
+ */
+function normalizePhone(phone) {
+  phone = phone.replace(/\D/g, '');
+
+  if (phone.length === 10) return '+91' + phone;
+  if (phone.length === 12 && phone.startsWith('91')) return '+' + phone;
+
+  throw new Error('Invalid phone number');
+}
 
 /**
  * =========================
- * SEND OTP (DEMO)
+ * SEND OTP (STATIC)
  * =========================
  */
+// exports.sendOtp = async (req, res) => {
+//   try {
+//     const phone = normalizePhone(req.body.phone);
+
+//     const [[user]] = await pool.query(
+//       `SELECT id, role FROM users_auth WHERE phone = ?`,
+//       [phone]
+//     );
+
+//     if (!user) {
+//       return res.status(404).json({ message: 'Phone number not registered' });
+//     }
+
+//     // Remove old OTPs
+//     await pool.query(`DELETE FROM otp_verification WHERE phone = ?`, [phone]);
+
+//     const otp = '1234'; // STATIC OTP
+//     const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
+
+//     await pool.query(
+//       `INSERT INTO otp_verification (phone, otp, expires_at)
+//        VALUES (?, ?, ?)`,
+//       [phone, otp, expiresAt]
+//     );
+
+//     res.json({ message: 'OTP sent successfully' });
+//   } catch (err) {
+//     console.error('SEND OTP ERROR:', err);
+//     res.status(500).json({ message: 'Server error' });
+//   }
+// };
+
+
+
+
 exports.sendOtp = async (req, res) => {
   try {
-    const { phone } = req.body;
-    if (!phone) {
-      return res.status(400).json({ message: 'Phone is required' });
-    }
+    const phone = normalizePhone(req.body.phone);
 
-    // 🔥 CHECK USER EXISTS
     const [[user]] = await pool.query(
       `SELECT id, role FROM users_auth WHERE phone = ?`,
       [phone]
     );
 
     if (!user) {
-      return res.status(404).json({
-        message: 'Phone number not registered'
-      });
+      return res.status(404).json({ message: 'Phone number not registered' });
     }
 
-    const otp = '1234';
-    const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
+    // 🔹 STATIC OTP MODE — DO NOT TOUCH DB
+    if (process.env.OTP_MODE === 'STATIC') {
+      return res.json({ message: 'OTP sent successfully' });
+    }
 
-    await pool.query(
-      `INSERT INTO otp_verification (phone, otp, expires_at)
-       VALUES (?, ?, ?)`,
-      [phone, otp, expiresAt]
-    );
+    // 🔜 MSG91 SEND OTP WILL COME HERE LATER
 
-    res.json({ message: 'OTP sent', otp });
   } catch (err) {
+    console.error('SEND OTP ERROR:', err);
     res.status(500).json({ message: 'Server error' });
   }
 };
 
 
-/**
- * =========================
- * VERIFY OTP + CREATE USER
- * =========================
- */
 
-/**
- * =========================
- * VERIFY OTP (ROLE FROM DB)
- * =========================
- */
 exports.verifyOtp = async (req, res) => {
   try {
-    const { phone, otp } = req.body;
+    const phone = normalizePhone(req.body.phone);
+    const { otp } = req.body;
 
-    if (!phone || !otp) {
-      return res.status(400).json({ message: 'Phone and OTP required' });
+    if (!otp) {
+      return res.status(400).json({ message: 'OTP required' });
     }
 
-    if (otp !== '1234') {
-      return res.status(401).json({ message: 'Invalid OTP' });
-    }
+    // const [[otpRow]] = await pool.query(
+    //   `SELECT * FROM otp_verification
+    //    WHERE phone = ? AND otp = ? AND expires_at > NOW()`,
+    //   [phone, otp]
+    // );
 
-    // 1️⃣ Get auth user
+    // if (!otpRow) {
+    //   return res.status(401).json({ message: 'Invalid or expired OTP' });
+    // }
+
+    /* =========================
+   OTP VERIFICATION
+========================= */
+if (process.env.OTP_MODE === 'STATIC') {
+  if (otp !== process.env.STATIC_OTP) {
+    return res.status(401).json({ message: 'Invalid OTP' });
+  }
+} else {
+  // 🔜 MSG91 VERIFY OTP WILL COME HERE
+}
+
+
     const [[user]] = await pool.query(
       `SELECT id, role FROM users_auth WHERE phone = ?`,
       [phone]
@@ -75,52 +124,81 @@ exports.verifyOtp = async (req, res) => {
       return res.status(404).json({ message: 'User not found' });
     }
 
-    // 2️⃣ AUTO CREATE PROFILE (KEY PART)
-    if (user.role === 'doctor') {
-      const [[doctor]] = await pool.query(
-        `SELECT id FROM doctors WHERE user_auth_id = ?`,
-        [user.id]
-      );
+    // Mark verified
+    await pool.query(
+      `UPDATE users_auth SET is_verified = 1 WHERE id = ?`,
+      [user.id]
+    );
 
-      if (!doctor) {
-        await pool.query(
-          `INSERT INTO doctors (id, user_auth_id, phone)
-           VALUES (?, ?, ?)`,
-          [uuidv4(), user.id, phone]
-        );
-      }
-    }
+    // Cleanup OTP
+    await pool.query(`DELETE FROM otp_verification WHERE phone = ?`, [phone]);
 
-    // PATIENT AUTO-LINK (NO DUPLICATES)
+    // Patient must be created by doctor
     if (user.role === 'patient') {
       const [[patient]] = await pool.query(
-        `SELECT id FROM patients WHERE user_auth_id = ?`,
+        `SELECT patient_id FROM patients WHERE user_auth_id = ?`,
         [user.id]
       );
 
       if (!patient) {
         return res.status(403).json({
-          message: 'Patient profile not created by doctor yet'
+          message: 'Patient profile not created. Contact doctor.',
         });
       }
     }
 
+const token = jwt.sign(
+  { userId: user.id, role: user.role },
+  process.env.JWT_SECRET,
+  { expiresIn: '1d' }
+);
+await pool.query(
+  `
+  INSERT INTO user_sessions
+  (session_id, user_auth_id, role)
+  VALUES (?, ?, ?)
+  `,
+  [
+    await generateCustomId('USER_SESSION'),
+    user.id,
+    user.role
+  ]
+);
 
-    // 3️⃣ Generate JWT
-    const token = jwt.sign(
-      { userId: user.id, role: user.role },
-      process.env.JWT_SECRET,
-      { expiresIn: '1d' }
-    );
-
-    return res.json({
+    res.json({
       message: 'OTP verified successfully',
       token,
       role: user.role,
     });
-
   } catch (err) {
     console.error('VERIFY OTP ERROR:', err);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
+/**
+ * =========================
+ * CREATE SUPPORT REQUEST
+ * =========================
+ */
+exports.createSupportRequest = async (req, res) => {
+  try {
+    const { name, age, gender, phone, purpose } = req.body;
+    const phoneNormalized = normalizePhone(phone);
+
+    if (!name || !age || !gender || !phone || !purpose) {
+      return res.status(400).json({ message: 'All fields are required' });
+    }
+
+    await pool.query(
+      `INSERT INTO support_requests (name, age, gender, phone, purpose)
+       VALUES (?, ?, ?, ?, ?)`,
+      [name, age, gender, phoneNormalized, purpose]
+    );
+
+    res.json({ message: 'Support request created successfully' });
+  } catch (err) {
+    console.error('SUPPORT ERROR:', err);
     res.status(500).json({ message: 'Server error' });
   }
 };
